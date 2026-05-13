@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+
+# Recall Lab data
+data/episodic/*.db
+data/episodic/*.sqlite
+data/runs/
+.recall_lab/
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
