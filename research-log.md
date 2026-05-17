@@ -15,3 +15,31 @@ Repo skeleton in place. Three layers stubbed: working memory, episodic log, cons
 Suggested next step: implement EpisodicLog.append and fetch_day against SQLite. Get a conversation flowing through SlidingWindowAgent end-to-end before anything else, so the eval harness has something to compare against.
 
 ---
+
+## May 17, 2026. First Week 1 slice runs end to end.
+
+Implemented `EpisodicLog.append`, `fetch_day`, and `mark_promoted` against SQLite. Verified the full round trip manually: write an exchange, fetch it back, mark it promoted with salience `0.9`, then fetch the updated row.
+
+Implemented `SlidingWindowAgent.respond` with OpenRouter-backed chat calls. Ran a five-turn synthetic conversation with `window=2` using `openai/gpt-4o-mini`.
+
+Observed first useful baseline failure: turn 1 stored "My favorite color is blue." By turn 5, the agent could not answer the favorite-color question because the fact had fallen outside the two-turn model context, even though the exchange still existed on disk.
+
+Added `demo.py` to run the baseline conversation and persist each exchange to a separate demo SQLite database. A clean demo run stored five exchanges.
+
+What worked:
+- Raw episodic persistence
+- Day-bounded exchange retrieval
+- Promotion bookkeeping in the raw log
+- End-to-end sliding-window baseline
+- Reproducible first synthetic run
+
+What is still stubbed:
+- Salience judge
+- Consolidated brief integration
+- Recall agent response path
+- Vector retrieval control
+- Evaluation scoring
+
+Suggested next step: implement the salience judge and score one synthetic conversation end to end before wiring the brief into the Recall agent.
+
+---

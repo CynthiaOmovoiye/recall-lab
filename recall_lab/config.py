@@ -24,7 +24,7 @@ RESEARCH_LOG_PATH = REPO_ROOT / "research-log.md"
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 AGENT_MODEL = os.environ.get("RECALL_AGENT_MODEL", "openai/gpt-4o-mini")
-JUDGE_MODEL = os.environ.get("RECALL_JUDGE_MODEL", "openai/gpt-4o-mini")
+JUDGE_MODEL = os.environ.get("RECALL_JUDGE_MODEL", "anthropic/claude-sonnet-4.6")
 
 # Memory
 WORKING_MAX_TURNS = 6  # recent turns injected alongside the brief
