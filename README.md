@@ -70,10 +70,7 @@ Still stubbed:
 - Vector retrieval control
 - Evaluation metrics
 
-## See also
 
-- Research notes and hypothesis tree: `/Users/cynthiaomovoiye/Documents/Claude/Projects/Profile Visibility/posts/03_memory_engineering_research_NOTES.md`
-- Public series: Becoming Mind on LinkedIn (chapter 1 drops May 13, 2026)
 
 ## Run
 
