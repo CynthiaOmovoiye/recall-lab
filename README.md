@@ -52,12 +52,25 @@ Deliberately small so the architecture, not the infra, is what is being measured
 
 ## Status
 
-Scaffold, May 12, 2026. Stubs in place. First runs targeted for week of May 18. First lab notebook post on LinkedIn targeted May 28.
+Week 1 build, May 17, 2026.
 
-## See also
+Working now:
 
-- Research notes and hypothesis tree: `/Users/cynthiaomovoiye/Documents/Claude/Projects/Profile Visibility/posts/03_memory_engineering_research_NOTES.md`
-- Public series: Becoming Mind on LinkedIn (chapter 1 drops May 13, 2026)
+- `EpisodicLog` persists raw exchanges to SQLite, fetches one UTC day of exchanges, and records promoted rows with salience scores.
+- `SlidingWindowAgent` runs end to end through OpenRouter.
+- `demo.py` runs a five-turn synthetic conversation with a two-turn window and stores each exchange in a separate demo database.
+
+First observed baseline failure: a fact introduced on turn 1 was unavailable by turn 5 once it fell outside the two-turn window, even though the exchange still existed on disk.
+
+Still stubbed:
+
+- Consolidated brief parsing and rendering
+- Recall agent prompt assembly
+- Salience judge
+- Vector retrieval control
+- Evaluation metrics
+
+
 
 ## Run
 
@@ -69,8 +82,8 @@ pip install -e .
 # Set your OpenRouter key
 echo 'OPENROUTER_API_KEY=sk-or-...' > .env
 
-# (once stubs are filled in)
-python -m recall_lab.eval.harness --agent recall --conversation sample
+# Run the first Week 1 baseline demo
+python demo.py
 ```
 
-Most commands will not work until the stubs are filled in. The architecture is what matters at this stage.
+The demo currently exercises the sliding-window baseline and episodic log. The full Recall Lab agent path is still under construction.
