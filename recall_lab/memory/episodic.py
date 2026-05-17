@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from recall_lab.config import EPISODIC_DB_PATH
@@ -51,15 +51,62 @@ class EpisodicLog:
 
     def append(self, exchange: Exchange) -> int:
         """Append a new exchange to the log. Returns the assigned row id."""
-        # TODO: insert into exchanges table, return lastrowid
-        raise NotImplementedError
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO exchanges (user, agent, timestamp)
+                VALUES (?, ?, ?)
+                """,
+                (
+                    exchange.user,
+                    exchange.agent,
+                    exchange.timestamp.isoformat(),
+                ),
+            )
+            return cursor.lastrowid
 
     def fetch_day(self, day: datetime) -> list[Exchange]:
         """Return all exchanges for the given calendar day (UTC)."""
-        # TODO: query by date range
-        raise NotImplementedError
+        start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=1)
+
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT id, user, agent, timestamp, salience, promoted
+                FROM exchanges
+                WHERE timestamp >= ? AND timestamp < ?
+                ORDER BY timestamp ASC
+                """,
+                (
+                    start.isoformat(),
+                    end.isoformat(),
+                ),
+            ).fetchall()
+
+        return [
+            Exchange(
+                id=row[0],
+                user=row[1],
+                agent=row[2],
+                timestamp=datetime.fromisoformat(row[3]),
+                salience=row[4],
+                promoted=bool(row[5]),
+            )
+            for row in rows
+        ]
 
     def mark_promoted(self, exchange_id: int, salience: float) -> None:
         """Record that an exchange was promoted to the brief, with its score."""
-        # TODO: update row by id
-        raise NotImplementedError
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE exchanges
+                SET salience = ?, promoted = 1
+                WHERE id = ?
+                """,
+                (
+                    salience,
+                    exchange_id,
+                ),
+            )
