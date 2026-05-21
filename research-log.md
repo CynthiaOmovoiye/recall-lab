@@ -43,3 +43,27 @@ What is still stubbed:
 Suggested next step: implement the salience judge and score one synthetic conversation end to end before wiring the brief into the Recall agent.
 
 ---
+
+## May 20, 2026. Activation and interference check.
+
+Implemented an ACT-R style activation function for memory traces. Activation combines creation recency, re-reference frequency, base salience, and emotional weight into one retrievability score.
+
+Added `recall_lab.consolidation.interference_check` to test an old fact against a newer contradiction:
+- Old memory: "User lives in Lagos"
+- New memory: "User moved to Berlin in April 2026"
+
+Scenario 1, clean slate:
+- Old fact: 40 days old, 0 re-references, activation `-2.633`
+- New fact: 5 days old, 0 re-references, activation `-1.594`
+- Winner: new
+
+Scenario 2, old fact re-referenced:
+- Old fact: 40 days old, re-referenced 3 times, activation `-0.063`
+- New fact: 5 days old, 0 re-references, activation `-1.594`
+- Winner: old
+
+Read: decay handles quiet stale facts, but frequency can keep an outdated fact stronger than a newer correction. Activation can estimate memory strength. It cannot decide whether a re-reference confirms a memory or contradicts it.
+
+Next design implication: contradiction handling belongs in the sleep job before reinforcement. If a user correction contradicts an older trace, the old trace should be marked superseded instead of reinforced.
+
+---
