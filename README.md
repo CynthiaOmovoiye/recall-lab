@@ -52,15 +52,19 @@ Deliberately small so the architecture, not the infra, is what is being measured
 
 ## Status
 
-Week 1 build, May 17, 2026.
+Week 1 build, May 17, 2026. Last update May 20, 2026.
 
 Working now:
 
 - `EpisodicLog` persists raw exchanges to SQLite, fetches one UTC day of exchanges, and records promoted rows with salience scores.
 - `SlidingWindowAgent` runs end to end through OpenRouter.
 - `demo.py` runs a five-turn synthetic conversation with a two-turn window and stores each exchange in a separate demo database.
+- `consolidation/activation.py` scores how retrievable a memory trace is, using an ACT-R style decay function over creation recency, re-reference frequency, and base salience.
+- `consolidation/interference_check.py` pits an old fact against a newer contradiction and prints which one wins retrieval.
 
 First observed baseline failure: a fact introduced on turn 1 was unavailable by turn 5 once it fell outside the two-turn window, even though the exchange still existed on disk.
+
+Second observed failure, contradiction: an old fact ("User lives in Lagos", 40 days old) lost retrieval to a newer correction ("User moved to Berlin", 5 days old) on a clean slate. After the old fact was re-referenced three times, it won again. Decay handles quiet stale facts, but frequency can keep an outdated fact stronger than a newer correction. Full numbers are in the May 20 research log entry.
 
 Still stubbed:
 
@@ -84,6 +88,9 @@ echo 'OPENROUTER_API_KEY=sk-or-...' > .env
 
 # Run the first Week 1 baseline demo
 python demo.py
+
+# Run the activation interference check
+python -m recall_lab.consolidation.interference_check
 ```
 
 The demo currently exercises the sliding-window baseline and episodic log. The full Recall Lab agent path is still under construction.
