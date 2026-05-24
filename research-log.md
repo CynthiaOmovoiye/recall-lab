@@ -87,3 +87,23 @@ Read: rank and validity are separate. Activation decides which memory is stronge
 Next design implication: wire contradiction handling into the sleep job. On a CORRECT verdict, the old memory should become superseded instead of reinforced.
 
 ---
+
+## May 24, 2026. Salience judge and brief consolidation slice.
+
+Implemented the first working consolidation path after the episodic log. The brief can now load markdown sections, render them back to disk, add entries under canonical sections, and deduplicate exact repeats.
+
+Implemented the salience judge through OpenRouter. Given one exchange, it returns a normalized `SalienceVerdict` with a score, reason, suggested brief section, and compressed statement. Low-salience exchanges below the threshold do not produce brief entries.
+
+Ran a smoke test with two synthetic exchanges:
+- High-salience: `My daughter is allergic to peanuts.`
+- Low-salience: `Thanks!`
+
+Result: the sleep job fetched two exchanges, promoted one, wrote `User's daughter has a peanut allergy.` into the brief, and marked the promoted exchange in SQLite.
+
+What this proves:
+- Raw episodic memory can now become compressed semantic memory.
+- The sleep job has a real first path from conversation log to brief.
+- Recall Lab can now test whether a brief created by consolidation changes later answers.
+
+Next step: wire the Recall agent so every response reads the brief first, then compare it against the sliding-window baseline on the same five-turn memory failure.
+
