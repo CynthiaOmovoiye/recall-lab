@@ -72,6 +72,7 @@ Working now:
 - `RecallAgent` now reads the consolidated brief before each answer, keeps only a small recent-turn buffer, calls OpenRouter, and appends every response to the episodic log.
 - `recall_demo.py` compares the two-turn sliding-window baseline against the brief-backed Recall agent on the favorite-color failure.
 - `eval/v01_head_to_head.py` turns that comparison into a tiny repeatable eval with an expected answer, recall accuracy, failure mode, and token estimate.
+- `eval/multiday_trial.py` runs configurable multi-day scenario files, so trial length, messages, final questions, and output paths can change without editing core logic.
 
 First observed baseline failure: a fact introduced on turn 1 was unavailable by turn 5 once it fell outside the two-turn window, even though the exchange still existed on disk.
 
@@ -110,6 +111,9 @@ python recall_demo.py
 
 # Run the first v0.1 head-to-head eval
 python -m recall_lab.eval.v01_head_to_head
+
+# Run the configurable retail memory-week trial
+python -m recall_lab.eval.multiday_trial
 ```
 
 `demo.py` exercises the sliding-window baseline and episodic log. `recall_demo.py` exercises the first working Recall Lab path: log, sleep job, brief, and brief-backed response.
