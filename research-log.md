@@ -174,7 +174,8 @@ Added `recall_lab.eval.multiday_trial`, which can run sliding window, Recall Lab
 
 Smoke test passed with a tiny one-day scenario.
 
-Next step: wire contradiction-aware memory updates into the sleep path before running the full retail trial, so Berlin can supersede Lagos instead of both facts simply living in the brief.
+Next step was to wire contradiction-aware memory updates into the sleep path before running the full retail trial, so Berlin can supersede Lagos instead of both facts simply living in the brief. This was completed in the next May 24 entry.
+
 ---
 
 ## May 24, 2026. Trace store, contradiction cap, and staged runner.
@@ -202,3 +203,37 @@ Retail day-1 staged result:
 
 Read: the system is now wired end to end, but full 4-day live runs should be staged because chat calls, salience judge calls, and contradiction calls are expensive. The safe ladder is day 1, then days 1-2, then full Recall-only, then both agents.
 
+
+---
+
+## May 24, 2026. Current repo state after trace-store integration.
+
+The repo now tells one end-to-end story:
+
+```text
+episodic log
+  -> salience judge
+  -> memory trace store
+  -> contradiction check
+  -> validity state
+  -> activation ranking
+  -> consolidated brief
+  -> RecallAgent answer
+```
+
+What is wired:
+- raw exchanges persist in SQLite
+- sleep job scores unpromoted exchanges
+- high-salience exchanges become machine-readable traces
+- new traces compare against the strongest active traces, capped at `3` by default
+- corrections can supersede old traces
+- active traces are ranked by activation before rendering into the brief
+- the multi-day runner can run staged trials and write JSON plus markdown reports
+
+What remains before the May 28/29 post:
+- run the full four-day retail trial in stages
+- compare Recall Lab against sliding window on the full scenario
+- inspect the report for stale-memory behavior
+- capture the report or trace table for the post
+
+The system is structurally ready. The public result still depends on the full trial output.
