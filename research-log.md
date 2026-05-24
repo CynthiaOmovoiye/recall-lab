@@ -133,3 +133,23 @@ Read: this is the first concrete head-to-head where compressed semantic memory c
 
 Next step: turn this into an evaluation harness with repeated scenarios, fixed expected answers, and measured success/failure instead of manual reading.
 
+---
+
+## May 24, 2026. v0.1 head-to-head eval harness.
+
+Added `recall_lab.eval.v01_head_to_head`, the first repeatable eval harness for the May 29 lab notebook post. The harness runs the same five-turn favorite-color scenario through two agents:
+- `sliding_window_2`
+- `recall_lab_brief_window_2`
+
+The expected answer for the final turn is `blue`. The scorer uses deterministic rules for v0.1: if the expected answer appears in the response, the turn is correct. If it does not appear and the model admits uncertainty, the failure mode is `honest_gap`. Otherwise the failure mode is `hallucinated`.
+
+Observed run:
+- Sliding window recall accuracy: `0.0` on 1 recall question. Failure mode: `honest_gap`.
+- Recall Lab recall accuracy: `1.0` on 1 recall question. Failure mode: `correct`.
+- Sliding output token estimate: `177`.
+- Recall Lab output token estimate: `107`.
+
+The token count is an approximation based on output text length, not billing data. The result is a tiny synthetic eval, not a benchmark. It is still useful because it is now repeatable and scored instead of read manually.
+
+Next step: add four more scenarios so the June 4 v0.2 post can report five conversations instead of one.
+
