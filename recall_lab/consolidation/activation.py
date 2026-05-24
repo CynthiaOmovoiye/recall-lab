@@ -19,7 +19,12 @@ from datetime import datetime
 
 @dataclass
 class MemoryTrace:
-    """A single memory entry tracked by the activation function."""
+    """A single memory entry tracked by the activation function.
+
+    `status` and `supersedes` are validity fields. They are written and read
+    by consolidation/contradiction.py. The activation() function below ignores
+    them on purpose. Rank and validity are separate decisions.
+    """
 
     turn_id: int
     compression: str
@@ -27,6 +32,8 @@ class MemoryTrace:
     created_at: datetime
     references: list[datetime] = field(default_factory=list)
     emotional_weight: float = 0.0
+    status: str = "active"  # active | superseded | archived
+    supersedes: int | None = None  # turn_id of the version this one replaced
 
 
 def activation(trace: MemoryTrace, now: datetime, decay: float = 0.5) -> float:

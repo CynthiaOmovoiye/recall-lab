@@ -1,1 +1,1 @@
-"""Consolidation: sleep job and salience judge."""
+"""Consolidation: sleep job, salience judge, activation, and validity state."""
