@@ -52,7 +52,7 @@ Deliberately small so the architecture, not the infra, is what is being measured
 
 ## Status
 
-Week 1 build, May 17, 2026. Last update May 20, 2026.
+Week 1 build, May 17, 2026. Last update May 24, 2026.
 
 Working now:
 
@@ -61,6 +61,7 @@ Working now:
 - `demo.py` runs a five-turn synthetic conversation with a two-turn window and stores each exchange in a separate demo database.
 - `consolidation/activation.py` scores how retrievable a memory trace is, using an ACT-R style decay function over creation recency, re-reference frequency, and base salience.
 - `consolidation/interference_check.py` pits an old fact against a newer contradiction and prints which one wins retrieval.
+- `consolidation/contradiction.py` is the validity half of memory. It classifies a new statement against an old fact as CONFIRM, CORRECT, or UNRELATED, moves a corrected fact from active to superseded, chains a supersedes pointer to its replacement, filters retrieval to current truth, and logs every transition so a suppression can be undone.
 
 First observed baseline failure: a fact introduced on turn 1 was unavailable by turn 5 once it fell outside the two-turn window, even though the exchange still existed on disk.
 
@@ -91,6 +92,9 @@ python demo.py
 
 # Run the activation interference check
 python -m recall_lab.consolidation.interference_check
+
+# Run the contradiction validity checks
+python -m recall_lab.consolidation.contradiction
 ```
 
 The demo currently exercises the sliding-window baseline and episodic log. The full Recall Lab agent path is still under construction.
