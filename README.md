@@ -67,6 +67,7 @@ Working now:
 - `consolidation/sleep.py` now runs a first end-to-end consolidation pass: fetch exchanges, skip already promoted rows, score new rows, promote high-salience statements into the brief, and mark promoted rows in SQLite.
 - `RecallAgent` now reads the consolidated brief before each answer, keeps only a small recent-turn buffer, calls OpenRouter, and appends every response to the episodic log.
 - `recall_demo.py` compares the two-turn sliding-window baseline against the brief-backed Recall agent on the favorite-color failure.
+- `eval/v01_head_to_head.py` turns that comparison into a tiny repeatable eval with an expected answer, recall accuracy, failure mode, and token estimate.
 
 First observed baseline failure: a fact introduced on turn 1 was unavailable by turn 5 once it fell outside the two-turn window, even though the exchange still existed on disk.
 
@@ -102,6 +103,9 @@ python -m recall_lab.consolidation.contradiction
 
 # Compare sliding window against the brief-backed Recall agent
 python recall_demo.py
+
+# Run the first v0.1 head-to-head eval
+python -m recall_lab.eval.v01_head_to_head
 ```
 
 `demo.py` exercises the sliding-window baseline and episodic log. `recall_demo.py` exercises the first working Recall Lab path: log, sleep job, brief, and brief-backed response.
