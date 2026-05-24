@@ -9,13 +9,14 @@
       "label": "May 24 night",
       "sleep_after": true,
       "turns": [
-        "Hi, I’m Amara. I want you to act like my personal shopping assistant this week.",
+        "Hi, I\u2019m Amara. I want you to act like my personal shopping assistant this week.",
         "My favorite color is blue, especially navy blue.",
         "My daughter has a peanut allergy, so please avoid peanut snacks or anything risky for her.",
         "I usually ship my orders to Lagos.",
-        "I’m looking for birthday gift ideas for my sister.",
+        "I\u2019m looking for birthday gift ideas for my sister.",
         "Thanks, I may come back tomorrow with more details."
-      ]
+      ],
+      "date": "2026-05-24T23:00:00+00:00"
     },
     {
       "label": "May 25",
@@ -29,27 +30,29 @@
         "Can you suggest a gift under 50,000 naira?",
         "Maybe a scarf would work for my sister.",
         "That helps, thank you."
-      ]
+      ],
+      "date": "2026-05-25T11:00:00+00:00"
     },
     {
       "label": "May 26",
       "sleep_after": true,
       "turns": [
         "My old Lagos address was easier for deliveries.",
-        "But for anything current, remember I’m in Berlin now.",
+        "But for anything current, remember I\u2019m in Berlin now.",
         "Can you compare a navy scarf and a blue tote bag?",
         "Which one feels more like a birthday gift?",
         "Please do not recommend peanut cookies again.",
         "What city should you ship to today?",
         "I might also buy shoes later, but not now.",
         "Keep the gift idea simple."
-      ]
+      ],
+      "date": "2026-05-26T11:00:00+00:00"
     },
     {
       "label": "May 27",
       "sleep_after": true,
       "turns": [
-        "I’m leaning toward the navy scarf.",
+        "I\u2019m leaning toward the navy scarf.",
         "Can you remind me what color I usually like?",
         "My sister likes quiet practical gifts.",
         "I used to order many things to Lagos when I lived there.",
@@ -57,7 +60,8 @@
         "Can you make the recommendation short?",
         "I may buy the tote bag next month instead.",
         "Thanks, I will decide in the morning."
-      ]
+      ],
+      "date": "2026-05-27T11:00:00+00:00"
     }
   ],
   "final_eval": {
@@ -88,6 +92,7 @@
         "expected": "history",
         "notes": "Secondary stable preference."
       }
-    ]
+    ],
+    "date": "2026-05-28T08:00:00+00:00"
   }
 }

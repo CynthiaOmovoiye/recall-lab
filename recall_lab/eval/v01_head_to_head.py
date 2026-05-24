@@ -24,6 +24,7 @@ from recall_lab.eval.harness import RunResult, run_conversation
 from recall_lab.eval.metrics import TurnVerdict, estimate_tokens, score_run
 from recall_lab.memory.brief import Brief
 from recall_lab.memory.episodic import EpisodicLog
+from recall_lab.memory.traces import MemoryTraceStore
 
 TURNS = [
     "My favorite color is blue.",
@@ -54,10 +55,18 @@ class AgentSummary:
 class SleepyRecallAgent:
     """RecallAgent wrapper that runs sleep after each non-final turn."""
 
-    def __init__(self, agent: RecallAgent, brief: Brief, log: EpisodicLog, day: datetime) -> None:
+    def __init__(
+        self,
+        agent: RecallAgent,
+        brief: Brief,
+        log: EpisodicLog,
+        trace_store: MemoryTraceStore,
+        day: datetime,
+    ) -> None:
         self.agent = agent
         self.brief = brief
         self.log = log
+        self.trace_store = trace_store
         self.day = day
         self.turn_count = 0
         self.sleep_summaries: list[dict[str, Any]] = []
@@ -66,7 +75,9 @@ class SleepyRecallAgent:
         response = self.agent.respond(user_message)
         self.turn_count += 1
         if self.turn_count < len(TURNS):
-            self.sleep_summaries.append(run_sleep_job(self.day, self.brief, self.log))
+            self.sleep_summaries.append(
+                run_sleep_job(self.day, self.brief, self.log, trace_store=self.trace_store)
+            )
         return response
 
 
@@ -102,12 +113,14 @@ def run_eval() -> dict[str, Any]:
 
     log = EpisodicLog(db_path=eval_dir / "recall_log.db")
     brief = Brief(path=eval_dir / "brief.md")
+    trace_store = MemoryTraceStore(path=eval_dir / "memory_traces.jsonl")
     brief.load()
     brief.save()
     recall = SleepyRecallAgent(
         agent=RecallAgent(brief=brief, log=log, working_window=2),
         brief=brief,
         log=log,
+        trace_store=trace_store,
         day=datetime.now(UTC),
     )
     recall_run = run_conversation(recall, TURNS, "recall_lab_brief_window_2")
