@@ -10,8 +10,16 @@ are compared against.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
+from openai import OpenAI
+
+from recall_lab.config import (
+    AGENT_MODEL,
+    OPENROUTER_API_KEY,
+    OPENROUTER_BASE_URL,
+    WORKING_MAX_TURNS,
+)
 from recall_lab.memory.brief import Brief
 from recall_lab.memory.episodic import Exchange, EpisodicLog
 from recall_lab.memory.working import WorkingMemory
@@ -20,9 +28,15 @@ from recall_lab.memory.working import WorkingMemory
 class RecallAgent:
     """The experimental agent the lab is built around."""
 
-    def __init__(self, brief: Brief, log: EpisodicLog) -> None:
+    def __init__(
+        self,
+        brief: Brief,
+        log: EpisodicLog,
+        working_window: int = WORKING_MAX_TURNS,
+    ) -> None:
         self.brief = brief
         self.log = log
+        self.working_window = working_window
         self.recent_turns: list[dict] = []
 
     def respond(self, user_message: str) -> str:
@@ -34,25 +48,35 @@ class RecallAgent:
         4. Append the exchange to the episodic log.
         5. Update the recent turns buffer.
         """
+        if not OPENROUTER_API_KEY:
+            raise RuntimeError("OPENROUTER_API_KEY is required to run RecallAgent.")
+
         self.brief.load()
         working = WorkingMemory(
             user_message=user_message,
             brief_text=self.brief.render(),
             recent_turns=list(self.recent_turns),
+            max_turns=self.working_window,
         )
         prompt = working.render()
-        # TODO: call the model with `prompt`. Return its text response.
-        response: str = ""
-        raise NotImplementedError(
-            "Wire up the OpenRouter client and return its response."
+
+        client = OpenAI(
+            base_url=OPENROUTER_BASE_URL,
+            api_key=OPENROUTER_API_KEY,
         )
-        # Below is left intentionally as the eventual completed flow:
+        completion = client.chat.completions.create(
+            model=AGENT_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        response = completion.choices[0].message.content or ""
+
         self.log.append(
             Exchange(
                 user=user_message,
                 agent=response,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
             )
         )
         self.recent_turns.append({"user": user_message, "agent": response})
+        self.recent_turns = self.recent_turns[-self.working_window :]
         return response

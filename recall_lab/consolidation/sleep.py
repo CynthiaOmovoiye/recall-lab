@@ -24,8 +24,13 @@ def run_sleep_job(day: datetime, brief: Brief, log: EpisodicLog) -> dict:
     Returns a summary dict suitable for appending to research-log.md.
     """
     exchanges = log.fetch_day(day)
+    scored = 0
     promoted = 0
     for ex in exchanges:
+        if ex.promoted:
+            continue
+
+        scored += 1
         verdict = score_exchange(ex)
         if (
             verdict.score >= SALIENCE_THRESHOLD
@@ -43,6 +48,7 @@ def run_sleep_job(day: datetime, brief: Brief, log: EpisodicLog) -> dict:
     return {
         "day": day.isoformat(),
         "exchanges": len(exchanges),
+        "scored": scored,
         "promoted": promoted,
         "threshold": SALIENCE_THRESHOLD,
     }

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from recall_lab.config import WORKING_MAX_TURNS
+
 
 @dataclass
 class WorkingMemory:
@@ -17,6 +19,7 @@ class WorkingMemory:
     user_message: str = ""
     brief_text: str = ""
     recent_turns: list[dict] = field(default_factory=list)
+    max_turns: int = WORKING_MAX_TURNS
 
     def render(self) -> str:
         """Render working memory as a single text block for the model.
@@ -28,5 +31,32 @@ class WorkingMemory:
 
         Returns a single string ready to pass as the user content in a chat call.
         """
-        # TODO: implement composition order: brief, recent_turns, user_message
-        raise NotImplementedError
+        lines = [
+            "You are the Recall Lab agent.",
+            "Use the memory brief as durable memory.",
+            "Use recent turns as short-term context.",
+            "For personal facts, use memory. If a personal fact is missing, say you do not know.",
+            "For general knowledge or simple reasoning, answer normally.",
+            "",
+            "## Memory brief",
+            self.brief_text.strip() or "(empty)",
+            "",
+            "## Recent turns",
+        ]
+
+        recent = self.recent_turns[-self.max_turns :]
+        if recent:
+            for turn in recent:
+                lines.append(f"User: {turn.get('user', '')}")
+                lines.append(f"Agent: {turn.get('agent', '')}")
+        else:
+            lines.append("(none)")
+
+        lines.extend(
+            [
+                "",
+                "## Current user message",
+                self.user_message,
+            ]
+        )
+        return "\n".join(lines).strip()
