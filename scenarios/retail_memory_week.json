@@ -1,0 +1,93 @@
+{
+  "name": "retail_memory_week",
+  "description": "A four-day synthetic trial for a returning retail customer. Tests durable preference recall, safety constraints, address correction, stale historical mentions, and distractor noise.",
+  "working_window": 2,
+  "customer_name": "Amara",
+  "agent_role": "retail shopping assistant",
+  "days": [
+    {
+      "label": "May 24 night",
+      "sleep_after": true,
+      "turns": [
+        "Hi, I’m Amara. I want you to act like my personal shopping assistant this week.",
+        "My favorite color is blue, especially navy blue.",
+        "My daughter has a peanut allergy, so please avoid peanut snacks or anything risky for her.",
+        "I usually ship my orders to Lagos.",
+        "I’m looking for birthday gift ideas for my sister.",
+        "Thanks, I may come back tomorrow with more details."
+      ]
+    },
+    {
+      "label": "May 25",
+      "sleep_after": true,
+      "turns": [
+        "Can you suggest something in my favorite color?",
+        "Would a snack hamper be safe for my daughter?",
+        "Where would you ship my order if I bought something today?",
+        "I like reading history books too, especially African history.",
+        "Actually, I moved to Berlin. Use Berlin for shipping from now on.",
+        "Can you suggest a gift under 50,000 naira?",
+        "Maybe a scarf would work for my sister.",
+        "That helps, thank you."
+      ]
+    },
+    {
+      "label": "May 26",
+      "sleep_after": true,
+      "turns": [
+        "My old Lagos address was easier for deliveries.",
+        "But for anything current, remember I’m in Berlin now.",
+        "Can you compare a navy scarf and a blue tote bag?",
+        "Which one feels more like a birthday gift?",
+        "Please do not recommend peanut cookies again.",
+        "What city should you ship to today?",
+        "I might also buy shoes later, but not now.",
+        "Keep the gift idea simple."
+      ]
+    },
+    {
+      "label": "May 27",
+      "sleep_after": true,
+      "turns": [
+        "I’m leaning toward the navy scarf.",
+        "Can you remind me what color I usually like?",
+        "My sister likes quiet practical gifts.",
+        "I used to order many things to Lagos when I lived there.",
+        "Do not treat Lagos as my current shipping city.",
+        "Can you make the recommendation short?",
+        "I may buy the tote bag next month instead.",
+        "Thanks, I will decide in the morning."
+      ]
+    }
+  ],
+  "final_eval": {
+    "label": "May 28 morning",
+    "questions": [
+      {
+        "text": "What color should you prioritize for me?",
+        "expected": "blue",
+        "notes": "Durable preference recall."
+      },
+      {
+        "text": "What food restriction should you remember for my daughter?",
+        "expected": "peanut",
+        "notes": "Safety-sensitive memory."
+      },
+      {
+        "text": "Where should you ship my order now?",
+        "expected": "Berlin",
+        "notes": "Current truth after correction."
+      },
+      {
+        "text": "Where did I use to ship orders before?",
+        "expected": "Lagos",
+        "notes": "Historical truth should remain available."
+      },
+      {
+        "text": "What kind of books do I like?",
+        "expected": "history",
+        "notes": "Secondary stable preference."
+      }
+    ]
+  }
+}

@@ -153,3 +153,26 @@ The token count is an approximation based on output text length, not billing dat
 
 Next step: add four more scenarios so the June 4 v0.2 post can report five conversations instead of one.
 
+---
+
+## May 24, 2026. Configurable retail memory-week trial scaffold.
+
+Added a configurable multi-day trial runner and the first retail scenario file. The scenario is stored as JSON, so the trial can change without touching core code:
+- number of days
+- day labels
+- number of exchanges
+- user messages
+- final evaluation questions
+- expected answers
+- working-window size
+
+The first scenario is `scenarios/retail_memory_week.json`. It simulates Amara, a returning retail customer, over four days and a final May 28 morning evaluation. The trial covers durable preferences, a safety-sensitive allergy, shipping-address correction, historical Lagos mentions, distractors, and final recall questions.
+
+Added `recall_lab.eval.multiday_trial`, which can run sliding window, Recall Lab, or both against any compatible scenario file. It writes two outputs:
+- `trial_result.json` for exact data
+- `trial_report.md` for a screenshot-friendly lab report
+
+Smoke test passed with a tiny one-day scenario.
+
+Next step: wire contradiction-aware memory updates into the sleep path before running the full retail trial, so Berlin can supersede Lagos instead of both facts simply living in the brief.
+
