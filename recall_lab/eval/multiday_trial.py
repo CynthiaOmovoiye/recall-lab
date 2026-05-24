@@ -23,7 +23,7 @@ from typing import Any, Literal
 from recall_lab.agent import RecallAgent
 from recall_lab.consolidation.sleep import run_sleep_job
 from recall_lab.controls.sliding import SlidingWindowAgent
-from recall_lab.eval.metrics import FailureMode, classify_failure_mode, estimate_tokens
+from recall_lab.eval.metrics import FailureMode, estimate_tokens, judge_failure_mode
 from recall_lab.memory.brief import Brief
 from recall_lab.memory.episodic import EpisodicLog
 from recall_lab.memory.traces import MemoryTraceStore
@@ -117,9 +117,9 @@ class TrialClock:
         return self.current
 
 
-def score_answer(response: str, expected: str) -> tuple[bool, FailureMode]:
-    """Score one final-eval answer."""
-    mode = classify_failure_mode(response, expected)
+def score_answer(question: str, response: str, expected: str) -> tuple[bool, FailureMode]:
+    """Score one final-eval answer with the LLM judge."""
+    mode = judge_failure_mode(question, response, expected)
     return mode == FailureMode.CORRECT, mode
 
 
@@ -160,7 +160,7 @@ def run_sliding_trial(
         if verbose:
             print(f"[sliding] {eval_label}: question {i}/{len(questions)}")
         response = agent.respond(question)
-        correct, mode = score_answer(response, expected)
+        correct, mode = score_answer(question, response, expected)
         result.records.append(
             AnswerRecord(
                 phase="final_eval",
@@ -240,7 +240,7 @@ def run_recall_trial(
             print(f"[recall] {eval_label}: question {i}/{len(questions)}")
         clock.set(eval_time + timedelta(minutes=i))
         response = agent.respond(question)
-        correct, mode = score_answer(response, expected)
+        correct, mode = score_answer(question, response, expected)
         result.records.append(
             AnswerRecord(
                 phase="final_eval",
@@ -256,7 +256,7 @@ def run_recall_trial(
         )
 
     result.brief_text = brief.path.read_text(encoding="utf-8")
-    result.memory_traces = [trace_store._to_dict(trace) for trace in trace_store.load()]
+    result.memory_traces = trace_store.to_dicts()
     return result
 
 
