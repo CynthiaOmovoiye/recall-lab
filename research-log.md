@@ -87,3 +87,69 @@ Read: rank and validity are separate. Activation decides which memory is stronge
 Next design implication: wire contradiction handling into the sleep job. On a CORRECT verdict, the old memory should become superseded instead of reinforced.
 
 ---
+
+## May 24, 2026. Salience judge and brief consolidation slice.
+
+Implemented the first working consolidation path after the episodic log. The brief can now load markdown sections, render them back to disk, add entries under canonical sections, and deduplicate exact repeats.
+
+Implemented the salience judge through OpenRouter. Given one exchange, it returns a normalized `SalienceVerdict` with a score, reason, suggested brief section, and compressed statement. Low-salience exchanges below the threshold do not produce brief entries.
+
+Ran a smoke test with two synthetic exchanges:
+- High-salience: `My daughter is allergic to peanuts.`
+- Low-salience: `Thanks!`
+
+Result: the sleep job fetched two exchanges, promoted one, wrote `User's daughter has a peanut allergy.` into the brief, and marked the promoted exchange in SQLite.
+
+What this proves:
+- Raw episodic memory can now become compressed semantic memory.
+- The sleep job has a real first path from conversation log to brief.
+- Recall Lab can now test whether a brief created by consolidation changes later answers.
+
+Next step: wire the Recall agent so every response reads the brief first, then compare it against the sliding-window baseline on the same five-turn memory failure.
+
+---
+
+## May 24, 2026. Brief-backed Recall agent beats the sliding-window failure.
+
+Wired the experimental `RecallAgent` for the first time. On every turn it now loads the consolidated brief, composes working memory from brief plus recent turns, calls OpenRouter, writes the response to the episodic log, and keeps only a bounded recent-turn buffer.
+
+Added `recall_demo.py` to compare two agents on the same five-turn sequence:
+1. `My favorite color is blue.`
+2. `I like reading history books.`
+3. `I am testing memory systems today.`
+4. `What is 2 + 2?`
+5. `What is my favorite color?`
+
+The sliding-window baseline used `window=2`. By turn 5, the favorite-color fact was outside the context window, and the model answered that it did not know.
+
+The Recall agent used the same two-turn working window, but the sleep job promoted the favorite-color fact into the brief after turn 1. By turn 5, the agent answered: `Your favorite color is blue.`
+
+Observed result:
+- Sliding window final answer: failed to recall the favorite color.
+- Recall Lab final answer: recalled blue from the consolidated brief.
+- Brief after consolidation contained `User's favorite color is blue.` and `User enjoys reading history books.`
+
+Read: this is the first concrete head-to-head where compressed semantic memory changes the final answer. It is still a tiny synthetic demo, not a benchmark result. But the full path now exists: raw exchange, salience score, promoted brief, brief-backed answer.
+
+Next step: turn this into an evaluation harness with repeated scenarios, fixed expected answers, and measured success/failure instead of manual reading.
+
+---
+
+## May 24, 2026. v0.1 head-to-head eval harness.
+
+Added `recall_lab.eval.v01_head_to_head`, the first repeatable eval harness for the May 29 lab notebook post. The harness runs the same five-turn favorite-color scenario through two agents:
+- `sliding_window_2`
+- `recall_lab_brief_window_2`
+
+The expected answer for the final turn is `blue`. The scorer uses deterministic rules for v0.1: if the expected answer appears in the response, the turn is correct. If it does not appear and the model admits uncertainty, the failure mode is `honest_gap`. Otherwise the failure mode is `hallucinated`.
+
+Observed run:
+- Sliding window recall accuracy: `0.0` on 1 recall question. Failure mode: `honest_gap`.
+- Recall Lab recall accuracy: `1.0` on 1 recall question. Failure mode: `correct`.
+- Sliding output token estimate: `177`.
+- Recall Lab output token estimate: `107`.
+
+The token count is an approximation based on output text length, not billing data. The result is a tiny synthetic eval, not a benchmark. It is still useful because it is now repeatable and scored instead of read manually.
+
+Next step: add four more scenarios so the June 4 v0.2 post can report five conversations instead of one.
+

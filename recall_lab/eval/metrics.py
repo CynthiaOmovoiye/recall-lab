@@ -30,16 +30,48 @@ class TurnVerdict:
     tokens: int = 0
 
 
+UNCERTAINTY_MARKERS = (
+    "i don't know",
+    "i do not know",
+    "i can't know",
+    "i cannot know",
+    "i don't have access",
+    "i do not have access",
+    "unless you tell me",
+    "if you tell me",
+    "you have not told me",
+    "you haven't told me",
+)
+
+
+def estimate_tokens(text: str) -> int:
+    """Cheap token estimate for lab notes.
+
+    This is not model billing data. It is a stable approximation so early evals
+    can compare relative context size before usage accounting is wired in.
+    """
+    if not text:
+        return 0
+    return max(1, round(len(text) / 4))
+
+
 def classify_failure_mode(response: str, ground_truth: str) -> FailureMode:
     """Classify a response as correct / drifted / hallucinated / honest_gap.
 
-    The honest_gap mode is the interesting one. If the agent says "I do not
-    remember" or expresses uncertainty when it lacks the fact, that is a win
-    even though the answer is not "correct" in the literal sense. Failure
-    modes that lie are worse than failure modes that admit ignorance.
+    The v0.1 eval uses a simple deterministic rule. If the expected answer
+    appears in the response, the turn is correct. If the answer is absent and
+    the model admits uncertainty, it is an honest gap. Otherwise it hallucinated.
     """
-    # TODO: use an LLM judge or rule-based classifier
-    raise NotImplementedError
+    normalized_response = response.lower()
+    normalized_truth = ground_truth.lower()
+
+    if normalized_truth in normalized_response:
+        return FailureMode.CORRECT
+
+    if any(marker in normalized_response for marker in UNCERTAINTY_MARKERS):
+        return FailureMode.HONEST_GAP
+
+    return FailureMode.HALLUCINATED
 
 
 def score_run(run_result, ground_truth_by_turn: list[str | None]) -> list[TurnVerdict]:
@@ -48,5 +80,23 @@ def score_run(run_result, ground_truth_by_turn: list[str | None]) -> list[TurnVe
     `ground_truth_by_turn[i]` is the expected answer for turn i, or None if
     that turn was not a recall question.
     """
-    # TODO: per-turn verdict
-    raise NotImplementedError
+    verdicts: list[TurnVerdict] = []
+    for turn in run_result.turns:
+        if turn.index >= len(ground_truth_by_turn):
+            continue
+
+        ground_truth = ground_truth_by_turn[turn.index]
+        if ground_truth is None:
+            continue
+
+        failure_mode = classify_failure_mode(turn.agent, ground_truth)
+        verdicts.append(
+            TurnVerdict(
+                turn_index=turn.index,
+                correct=failure_mode == FailureMode.CORRECT,
+                failure_mode=failure_mode,
+                tokens=turn.tokens or estimate_tokens(turn.agent),
+            )
+        )
+
+    return verdicts
