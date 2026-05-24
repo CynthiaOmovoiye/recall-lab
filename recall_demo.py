@@ -19,6 +19,7 @@ from recall_lab.consolidation.sleep import run_sleep_job
 from recall_lab.controls.sliding import SlidingWindowAgent
 from recall_lab.memory.brief import Brief
 from recall_lab.memory.episodic import EpisodicLog
+from recall_lab.memory.traces import MemoryTraceStore
 
 TURNS = [
     "My favorite color is blue.",
@@ -54,6 +55,7 @@ def run_recall_agent() -> tuple[str, str]:
 
     log = EpisodicLog(db_path=demo_dir / "log.db")
     brief = Brief(path=demo_dir / "brief.md")
+    trace_store = MemoryTraceStore(path=demo_dir / "memory_traces.jsonl")
     brief.load()
     brief.save()
 
@@ -70,7 +72,7 @@ def run_recall_agent() -> tuple[str, str]:
         print("agent:", response)
 
         if i < len(TURNS):
-            summary = run_sleep_job(day, brief, log)
+            summary = run_sleep_job(day, brief, log, trace_store=trace_store)
             print("sleep:", summary)
 
     return final_response, brief.path.read_text(encoding="utf-8")

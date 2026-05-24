@@ -175,4 +175,30 @@ Added `recall_lab.eval.multiday_trial`, which can run sliding window, Recall Lab
 Smoke test passed with a tiny one-day scenario.
 
 Next step: wire contradiction-aware memory updates into the sleep path before running the full retail trial, so Berlin can supersede Lagos instead of both facts simply living in the brief.
+---
+
+## May 24, 2026. Trace store, contradiction cap, and staged runner.
+
+Implemented the remaining end-to-end memory path needed before the full retail trial:
+- Added a JSONL memory trace store for promoted semantic memories.
+- Added `TRACE_STORE_PATH` and `CONTRADICTION_COMPARE_LIMIT`.
+- Added a `section` field to `MemoryTrace` so traces can render back into the brief.
+- Wired sleep job through salience, trace creation, contradiction checks, validity transitions, activation ranking, and brief rendering.
+- Capped contradiction checks to the top active traces by activation, default `3`, so full trials do not grow into unbounded pairwise comparisons.
+- Added progress logs to the multi-day runner with `--verbose`.
+
+Smoke checks passed:
+- Trace store saved and loaded active/superseded memories.
+- Brief rendering filtered out a superseded Lagos trace and kept active Berlin.
+- Tiny one-day trial passed.
+- Retail day-1 Recall-only staged run completed.
+
+Retail day-1 staged result:
+- 6 exchanges
+- 4 promoted
+- 4 active traces
+- 2 skipped as low salience
+- final eval accuracy after only day 1: `0.6`
+
+Read: the system is now wired end to end, but full 4-day live runs should be staged because chat calls, salience judge calls, and contradiction calls are expensive. The safe ladder is day 1, then days 1-2, then full Recall-only, then both agents.
 

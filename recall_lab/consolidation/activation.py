@@ -34,6 +34,7 @@ class MemoryTrace:
     emotional_weight: float = 0.0
     status: str = "active"  # active | superseded | archived
     supersedes: int | None = None  # turn_id of the version this one replaced
+    section: str = "stable_facts"
 
 
 def activation(trace: MemoryTrace, now: datetime, decay: float = 0.5) -> float:

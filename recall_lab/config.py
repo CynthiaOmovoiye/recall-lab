@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 EPISODIC_DB_PATH = DATA_DIR / "episodic" / "log.db"
 BRIEF_PATH = REPO_ROOT / "brief.md"
+TRACE_STORE_PATH = DATA_DIR / "memory_traces.jsonl"
 RESEARCH_LOG_PATH = REPO_ROOT / "research-log.md"
 
 # LLM (OpenRouter via the OpenAI client)
@@ -34,3 +35,4 @@ BRIEF_MAX_TOKENS = 2000  # cap on the consolidated brief size
 # Salience scoring
 SALIENCE_THRESHOLD = 0.5  # below this, exchange is not promoted to brief
 DECAY_HALF_LIFE_DAYS = 14  # used in Forgetting Curves Lab (secondary experiment)
+CONTRADICTION_COMPARE_LIMIT = int(os.environ.get("RECALL_CONTRADICTION_COMPARE_LIMIT", "3"))
