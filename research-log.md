@@ -107,3 +107,29 @@ What this proves:
 
 Next step: wire the Recall agent so every response reads the brief first, then compare it against the sliding-window baseline on the same five-turn memory failure.
 
+---
+
+## May 24, 2026. Brief-backed Recall agent beats the sliding-window failure.
+
+Wired the experimental `RecallAgent` for the first time. On every turn it now loads the consolidated brief, composes working memory from brief plus recent turns, calls OpenRouter, writes the response to the episodic log, and keeps only a bounded recent-turn buffer.
+
+Added `recall_demo.py` to compare two agents on the same five-turn sequence:
+1. `My favorite color is blue.`
+2. `I like reading history books.`
+3. `I am testing memory systems today.`
+4. `What is 2 + 2?`
+5. `What is my favorite color?`
+
+The sliding-window baseline used `window=2`. By turn 5, the favorite-color fact was outside the context window, and the model answered that it did not know.
+
+The Recall agent used the same two-turn working window, but the sleep job promoted the favorite-color fact into the brief after turn 1. By turn 5, the agent answered: `Your favorite color is blue.`
+
+Observed result:
+- Sliding window final answer: failed to recall the favorite color.
+- Recall Lab final answer: recalled blue from the consolidated brief.
+- Brief after consolidation contained `User's favorite color is blue.` and `User enjoys reading history books.`
+
+Read: this is the first concrete head-to-head where compressed semantic memory changes the final answer. It is still a tiny synthetic demo, not a benchmark result. But the full path now exists: raw exchange, salience score, promoted brief, brief-backed answer.
+
+Next step: turn this into an evaluation harness with repeated scenarios, fixed expected answers, and measured success/failure instead of manual reading.
+
