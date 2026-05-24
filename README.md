@@ -64,7 +64,9 @@ Working now:
 - `consolidation/contradiction.py` is the validity half of memory. It classifies a new statement against an old fact as CONFIRM, CORRECT, or UNRELATED, moves a corrected fact from active to superseded, chains a supersedes pointer to its replacement, filters retrieval to current truth, and logs every transition so a suppression can be undone.
 - `memory/brief.py` now loads, renders, deduplicates, and saves the consolidated memory brief.
 - `consolidation/judge.py` now scores exchanges through OpenRouter and returns a normalized salience verdict.
-- `consolidation/sleep.py` now runs a first end-to-end consolidation pass: fetch exchanges, score them, promote high-salience statements into the brief, and mark promoted rows in SQLite.
+- `consolidation/sleep.py` now runs a first end-to-end consolidation pass: fetch exchanges, skip already promoted rows, score new rows, promote high-salience statements into the brief, and mark promoted rows in SQLite.
+- `RecallAgent` now reads the consolidated brief before each answer, keeps only a small recent-turn buffer, calls OpenRouter, and appends every response to the episodic log.
+- `recall_demo.py` compares the two-turn sliding-window baseline against the brief-backed Recall agent on the favorite-color failure.
 
 First observed baseline failure: a fact introduced on turn 1 was unavailable by turn 5 once it fell outside the two-turn window, even though the exchange still existed on disk.
 
@@ -72,10 +74,10 @@ Second observed failure, contradiction: an old fact ("User lives in Lagos", 40 d
 
 Still stubbed:
 
-- Recall agent prompt assembly
 - Vector retrieval control
 - Evaluation metrics
 - Brief decay policy
+- Contradiction-aware sleep job integration
 
 
 
@@ -97,6 +99,9 @@ python -m recall_lab.consolidation.interference_check
 
 # Run the contradiction validity checks
 python -m recall_lab.consolidation.contradiction
+
+# Compare sliding window against the brief-backed Recall agent
+python recall_demo.py
 ```
 
-The demo currently exercises the sliding-window baseline and episodic log. The full Recall Lab agent path is still under construction.
+`demo.py` exercises the sliding-window baseline and episodic log. `recall_demo.py` exercises the first working Recall Lab path: log, sleep job, brief, and brief-backed response.
