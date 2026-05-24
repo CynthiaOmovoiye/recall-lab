@@ -237,3 +237,48 @@ What remains before the May 28/29 post:
 - capture the report or trace table for the post
 
 The system is structurally ready. The public result still depends on the full trial output.
+---
+
+## May 24, 2026. Full retail memory-week trial completed.
+
+Ran the full four-day retail shopping assistant scenario with both agents:
+- `sliding_window_2`
+- `recall_lab_brief_window_2`
+
+Scenario shape:
+- 30 chat exchanges across May 24 night through May 27
+- 5 final evaluation questions on May 28 morning
+- working window: 2 turns
+
+Result:
+- Sliding window recall accuracy: `0.2`
+- Recall Lab recall accuracy: `1.0`
+- Sliding output token estimate: `5766`
+- Recall Lab output token estimate: `2538`
+
+Final eval answers:
+- color preference: sliding passed, Recall Lab passed
+- daughter's peanut restriction: sliding failed, Recall Lab passed
+- current shipping city Berlin: sliding failed, Recall Lab passed
+- historical shipping city Lagos: sliding failed, Recall Lab passed
+- history book preference: sliding failed, Recall Lab passed
+
+Sleep summaries:
+- May 24 night: 4 promoted, 4 active traces
+- May 25: 5 promoted, 1 corrected, 6 active traces, 7 total traces
+- May 26: 2 promoted, 2 confirmed, 6 active traces
+- May 27: 4 promoted, 2 confirmed, 8 active traces, 9 total traces
+
+Most important trace result:
+- `User (Amara) typically ships orders to Lagos.` became `superseded`.
+- `User's shipping address is now Berlin; use Berlin for all future shipping.` stayed active and superseded the Lagos trace.
+- A separate active historical memory preserved that Amara previously lived in Lagos and ordered goods there.
+
+Read: this is the first full end-to-end Recall Lab win on a controlled multi-day scenario. The result is still synthetic and small, but it tests the full loop: episodic log, salience scoring, trace creation, contradiction, validity state, activation-ranked brief rendering, and final recall.
+
+Report outputs:
+- `reports/retail_memory_week/trial_result.json`
+- `reports/retail_memory_week/trial_report.md`
+
+Next step: inspect the generated report, capture a clean screenshot or table for the May 28/29 lab notebook post, and keep the claims scoped to one synthetic scenario.
+
