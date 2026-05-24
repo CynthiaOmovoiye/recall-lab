@@ -67,3 +67,23 @@ Read: decay handles quiet stale facts, but frequency can keep an outdated fact s
 Next design implication: contradiction handling belongs in the sleep job before reinforcement. If a user correction contradicts an older trace, the old trace should be marked superseded instead of reinforced.
 
 ---
+## May 24, 2026. Contradiction and validity state.
+
+Implemented `recall_lab.consolidation.contradiction` as the validity half of memory. This builds on the May 20 result: activation can rank memories, but it cannot tell whether a strong memory is still true.
+
+What changed:
+- Added `status` and `supersedes` fields to `MemoryTrace`.
+- Added `MemoryStatus`: active, superseded, archived.
+- Added `classify(old, new)` to label a new statement against an old fact as CONFIRM, CORRECT, or UNRELATED.
+- Added `supersede()` to move an old trace from active to superseded and point the new trace back to it.
+- Added `revert()` so a wrong suppression can be undone one transition at a time.
+- Added `append_transition()` to write validity changes to `data/transitions.jsonl`.
+- Added `current_traces()` so retrieval can filter for current truth before ranking with activation.
+
+Offline checks passed: correction chains, one-step revert, CONFIRM guard, and transition logging. Live `classify()` checks passed for three pairs: Lagos to Berlin as CORRECT, Lagos to Lagos as CONFIRM, and Lagos to tab indentation as UNRELATED.
+
+Read: rank and validity are separate. Activation decides which memory is strongest. Validity decides whether that memory is allowed to count as current truth. Retrieval should filter by validity first, then rank the survivors.
+
+Next design implication: wire contradiction handling into the sleep job. On a CORRECT verdict, the old memory should become superseded instead of reinforced.
+
+---
