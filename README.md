@@ -50,6 +50,10 @@ Same conversational task, three baselines plus the experimental agent:
 
 Deliberately small so the architecture, not the infra, is what is being measured.
 
+## Prior art note
+
+Recall Lab does not claim to invent validity tracking, contradiction handling, or belief update. It adapts older ideas from truth maintenance systems, belief revision, temporal databases, and temporal knowledge graphs to the LLM agent memory setting, then tests whether those ideas reduce stale-memory failures in practice.
+
 ## Status
 
 Week 1 build, May 17, 2026. Last update May 24, 2026.
