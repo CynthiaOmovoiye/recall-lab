@@ -281,4 +281,36 @@ Report outputs:
 - `reports/retail_memory_week/trial_report.md`
 
 Next step: inspect the generated report, capture a clean screenshot or table for the May 28/29 lab notebook post, and keep the claims scoped to one synthetic scenario.
+---
+
+## May 24, 2026. Scorer and brief-render fixes, full trial rerun.
+
+Applied the first three review fixes before using the retail result publicly:
+
+1. Fixed brief rendering. Trace sections now pass through the brief section aliases, so reports show human-readable headings like `Stable facts about the user` instead of raw keys like `stable_facts`.
+2. Replaced the substring scorer for multi-day final evals with an LLM judge rubric. The scorer no longer marks a generic answer correct just because it contains the expected word.
+3. Reran the full four-day retail trial with both agents.
+
+Rescored result:
+- Sliding window recall accuracy: `0.0`
+- Recall Lab recall accuracy: `0.8`
+- Sliding output token estimate: `5039`
+- Recall Lab output token estimate: `2136`
+
+The earlier sliding-window `0.2` was a false positive from substring scoring. The color answer mentioned blue as one generic option, not as remembered preference. The LLM scorer correctly marked it as hallucinated.
+
+Recall Lab passed:
+- favorite color: navy blue
+- daughter allergy: peanut
+- current shipping city: Berlin
+- book preference: history books / African history
+
+Recall Lab failed:
+- historical shipping city: Lagos
+
+Read: the corrected result is stronger and more honest. Recall Lab protects current truth after correction, but loses access to superseded history unless the user restates it later as history. That is now the main finding for the May 28/29 post.
+
+Report outputs:
+- `reports/retail_memory_week_rescored/trial_result.json`
+- `reports/retail_memory_week_rescored/trial_report.md`
 

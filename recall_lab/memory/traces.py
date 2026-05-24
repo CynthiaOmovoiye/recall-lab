@@ -14,7 +14,7 @@ from pathlib import Path
 from recall_lab.config import TRACE_STORE_PATH
 from recall_lab.consolidation.activation import MemoryTrace, activation
 from recall_lab.consolidation.contradiction import MemoryStatus, current_traces
-from recall_lab.memory.brief import Brief
+from recall_lab.memory.brief import Brief, SECTION_ALIASES
 
 
 class MemoryTraceStore:
@@ -57,12 +57,17 @@ class MemoryTraceStore:
         )
 
         for trace in active:
-            sections.setdefault(trace.section, [])
-            if trace.compression not in sections[trace.section]:
-                sections[trace.section].append(trace.compression)
+            section = SECTION_ALIASES.get(trace.section, trace.section)
+            sections.setdefault(section, [])
+            if trace.compression not in sections[section]:
+                sections[section].append(trace.compression)
 
         brief.sections = sections
         brief.save()
+
+    def to_dicts(self) -> list[dict]:
+        """Return all traces as JSON-serializable dictionaries."""
+        return [self._to_dict(trace) for trace in self.load()]
 
     @staticmethod
     def _to_dict(trace: MemoryTrace) -> dict:
