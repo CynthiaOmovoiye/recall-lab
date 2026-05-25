@@ -84,10 +84,11 @@ def write_summary(payloads: list[dict[str, Any]], path: Path) -> None:
         for agent in payload["agents"]:
             by_agent.setdefault(agent["agent_name"], []).append(agent)
 
+    scenario_name = payloads[0].get("scenario_name") or "unknown_scenario"
     lines = [
-        "# Recall Lab variance, retail_memory_week",
+        f"# Recall Lab variance, {scenario_name}",
         "",
-        f"{len(payloads)} runs of the four-day both-agents trial.",
+        f"{len(payloads)} runs of the both-agents trial.",
         "Same scenario, same code. The spread comes from the agents answering "
         "above temperature zero. The judge and classifier run at temperature zero.",
         "",
