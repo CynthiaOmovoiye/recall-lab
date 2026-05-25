@@ -645,3 +645,23 @@ One failure remains. Run 1 still put a Lagos trace after Berlin in the Past sect
 The agent then answered the right-before-current question with Lagos. The data was wrong, and the answer followed the data. This is no longer a prompt-order problem. It is a lineage construction problem: a stale Lagos trace can still enter the chain after Berlin, even with user-only salience. The next fix is not more prompt wording. The trace store needs topic-level lineage, so one shipping-address chain cannot accept an older city after a newer city unless the user explicitly reverts.
 
 Read: v8 validates the source-control patch and explicit labels, but multi-step memory now needs lineage constraints. The chain is close, not solved.
+
+---
+
+## May 25, 2026. The run-1 leak was the soft patch, not a lineage gap.
+
+A closer read of the v8 run-1 trace revised the entry above.
+
+The v8 source-control patch was a prompt instruction. The judge saw the user turn and the agent turn, and was told to extract facts from the user turn only. The judge followed that most of the time. v8 at `0.96` is the proof. Run 1 is the proof it is not airtight.
+
+Run 1's late Lagos trace carries `supersedes = 7`, the Berlin trace, so it was minted after Berlin and superseded it. The `relocation_chain` scenario never has the user mention Lagos after day 1. So the Lagos content came from an agent turn, and the judge extracted it despite the instruction. A prompt instruction is a request the model can decline.
+
+That reframes the next fix. The lineage-constraint idea from the v8 entry is sound, but it is not the fix to reach for. A lineage constraint only does work when a bad trace is created. With airtight source control every trace is user-asserted, so every change to the chain is a real user statement, and the constraint never fires. A constraint also needs to tell a real revert from a phantom, which is the same user-versus-agent question source control already answers. Source control is the foundation.
+
+The fix. The judge no longer sees the agent turn at all. `JUDGE_PROMPT` shows only the user turn, and `score_exchange` passes only `exchange.user`. The judge cannot extract a fact it cannot see. The soft rule is now structural.
+
+The cost is small. The judge loses the agent turn as scoring context. Durable user facts, preferences, allergies, addresses, are self-contained in the user turn. A pure confirmation like "yes please" scores low and is skipped anyway.
+
+Verified offline: judge.py compiles, the agent placeholder is gone from the prompt, `format(user=...)` works without a missing key, and the 19 tests pass.
+
+Result, pending: rerun `relocation_chain` as v9. The run-1 leak should not recur. Berlin should reach `5/5`. If a clean run still corrupts the chain through a different path, a user turn the judge mis-reads for example, that is when the lineage constraint earns its place.
