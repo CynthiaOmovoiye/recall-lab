@@ -38,9 +38,10 @@ class WorkingMemory:
             "For personal facts, use memory. If a personal fact is missing, say you do not know.",
             (
                 "The 'Past, no longer current' section is history, listed oldest "
-                "first. The first item is the earliest, the last item is the most "
-                "recent past. Use it only when the user asks about the past. Never "
-                "treat it as a current fact."
+                "first with explicit labels. Use 'Earliest past' for first-ever "
+                "questions and 'Most recent past before current' for right-before-current "
+                "questions. Use it only when the user asks about the past. Never treat "
+                "it as a current fact."
             ),
             "For general knowledge or simple reasoning, answer normally.",
             "",

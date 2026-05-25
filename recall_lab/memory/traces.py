@@ -73,8 +73,17 @@ class MemoryTraceStore:
             key=lambda trace: trace.created_at,
         )
         past_section = SECTION_ALIASES["past"]
-        for trace in superseded:
-            line = f"Previously: {trace.compression}"
+        total_past = len(superseded)
+        for index, trace in enumerate(superseded, start=1):
+            if total_past == 1:
+                label = "Past"
+            elif index == 1:
+                label = "Earliest past"
+            elif index == total_past:
+                label = "Most recent past before current"
+            else:
+                label = f"Past step {index}"
+            line = f"{label}: {trace.compression}"
             sections.setdefault(past_section, [])
             if line not in sections[past_section]:
                 sections[past_section].append(line)

@@ -49,6 +49,13 @@ For the exchange below, return JSON with these fields:
 - suggested_statement: a single compressed semantic sentence to file under that section.
   Use null if score < 0.5.
 
+Critical source rule:
+- Extract durable facts only from the USER text.
+- Treat the AGENT text as context for judging the user's intent, not as a source
+  of new facts about the user.
+- If the agent mentions a fact that the user did not assert in this turn, do not
+  file that fact as a new memory.
+
 Score high when the exchange:
 - States a stable fact about the user
 - Names an active intent or goal
