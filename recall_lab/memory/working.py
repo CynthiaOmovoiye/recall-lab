@@ -36,6 +36,10 @@ class WorkingMemory:
             "Use the memory brief as durable memory.",
             "Use recent turns as short-term context.",
             "For personal facts, use memory. If a personal fact is missing, say you do not know.",
+            (
+                "The 'Past, no longer current' section is history. Use it only when the "
+                "user asks about the past. Never treat it as a current fact."
+            ),
             "For general knowledge or simple reasoning, answer normally.",
             "",
             "## Memory brief",

@@ -8,7 +8,13 @@ from __future__ import annotations
 
 from openai import OpenAI
 
-from recall_lab.config import AGENT_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL, SLIDING_WINDOW_TURNS
+from recall_lab.config import (
+    AGENT_MODEL,
+    MAX_OUTPUT_TOKENS,
+    OPENROUTER_API_KEY,
+    OPENROUTER_BASE_URL,
+    SLIDING_WINDOW_TURNS,
+)
 
 
 class SlidingWindowAgent:
@@ -37,6 +43,7 @@ class SlidingWindowAgent:
         completion = client.chat.completions.create(
             model=AGENT_MODEL,
             messages=messages,
+            max_tokens=MAX_OUTPUT_TOKENS,
         )
 
         response = completion.choices[0].message.content or ""

@@ -17,7 +17,7 @@ from typing import Any
 
 from openai import OpenAI
 
-from recall_lab.config import JUDGE_MODEL, OPENROUTER_API_KEY, OPENROUTER_BASE_URL
+from recall_lab.config import JUDGE_MODEL, MAX_OUTPUT_TOKENS, OPENROUTER_API_KEY, OPENROUTER_BASE_URL
 from recall_lab.memory.episodic import Exchange
 
 
@@ -137,6 +137,7 @@ def score_exchange(exchange: Exchange) -> SalienceVerdict:
             {"role": "user", "content": prompt},
         ],
         temperature=0,
+        max_tokens=MAX_OUTPUT_TOKENS,
     )
 
     content = completion.choices[0].message.content or "{}"
