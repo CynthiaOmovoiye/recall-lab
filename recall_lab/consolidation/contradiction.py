@@ -36,8 +36,9 @@ from pathlib import Path
 from openai import OpenAI
 
 from recall_lab.config import (
-    AGENT_MODEL,
+    CONTRADICTION_MODEL,
     DATA_DIR,
+    MAX_OUTPUT_TOKENS,
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
 )
@@ -99,21 +100,50 @@ Return JSON only:
 """
 
 
-def classify(old: str, new: str, model: str = AGENT_MODEL) -> ConflictVerdict:
+def _extract_verdict_json(text: str) -> dict:
+    """Parse a JSON object from plain or fenced model output.
+
+    The strong model can wrap JSON in a markdown fence or add a stray line.
+    This strips a fence and, failing that, slices out the first {...} block.
+    Raises ValueError if the result is not a JSON object.
+    """
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.strip("`").strip()
+        if stripped.startswith("json"):
+            stripped = stripped[4:].strip()
+
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise
+        parsed = json.loads(stripped[start : end + 1])
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Verdict response must be a JSON object.")
+    return parsed
+
+
+def classify(old: str, new: str, model: str = CONTRADICTION_MODEL) -> ConflictVerdict:
     """Classify how a new statement relates to an old remembered fact.
 
     Calls the model via OpenRouter. This is the detector and nothing else. It
-    does not touch any trace. The sleep job decides what to do with the
-    verdict.
+    does not touch any trace. The sleep job decides what to do with the verdict.
 
-    On any parse failure it returns UNRELATED. An unreadable verdict must
-    never be allowed to suppress a fact, so the failure mode is the safe one.
+    Runs at temperature zero on the strong model. Spotting an implicit
+    correction is the hardest reasoning call in the system, so it uses the same
+    model class as the judge, not the cheap agent model.
+
+    On any parse failure it returns UNRELATED. An unreadable verdict must never
+    be allowed to suppress a fact, so the failure mode is the safe one.
 
     Args:
         old: the existing remembered fact, as a compressed statement.
         new: the incoming statement to compare against it.
-        model: OpenRouter model id. Defaults to AGENT_MODEL, which supports
-            JSON-object responses.
+        model: OpenRouter model id. Defaults to CONTRADICTION_MODEL.
 
     Returns:
         A ConflictVerdict with a label and a one-line reason.
@@ -122,14 +152,21 @@ def classify(old: str, new: str, model: str = AGENT_MODEL) -> ConflictVerdict:
     client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=OPENROUTER_API_KEY)
     completion = client.chat.completions.create(
         model=model,
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": "Return only valid JSON. Do not include markdown or commentary.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0,
+        max_tokens=MAX_OUTPUT_TOKENS,
     )
     raw = completion.choices[0].message.content or ""
 
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
+        data = _extract_verdict_json(raw)
+    except (json.JSONDecodeError, ValueError):
         return ConflictVerdict(label=UNRELATED, reason=f"unparseable verdict: {raw!r}")
 
     label = str(data.get("label", "")).strip().upper()

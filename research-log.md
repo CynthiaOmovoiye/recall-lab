@@ -405,3 +405,139 @@ Local reports:
 - `reports/variance/v3_ensemble_judge/variance_summary.md`
 - `reports/variance/v3_ensemble_judge/run_1` through `run_5`
 
+---
+
+## May 25, 2026. Item 6: contradiction classifier moved to the strong model.
+
+The audited variance run showed every Recall Lab miss sat on the Lagos-to-Berlin correction. Color, peanut, and books passed 5 of 5. Current city Berlin passed 4 of 5. Old city Lagos passed 3 of 5. The plain stored facts never failed. The correction did.
+
+The correction is decided by `contradiction.classify()`. That call was running on `gpt-4o-mini`, the cheap agent model. The weak spot in the result and the weak model in the code were the same place.
+
+What changed:
+- Added `CONTRADICTION_MODEL` to `config.py`. It defaults to the judge model, `claude-sonnet-4.6`, and takes an env override, `RECALL_CONTRADICTION_MODEL`.
+- `classify()` now uses it. Spotting an implicit correction is the hardest reasoning call in the system. The STALE paper logged on 2026-05-24 is built around that exact case. It belongs on the strong model.
+- Dropped the `response_format` JSON-object parameter. It suited the cheap model. The strong model uses the system-message-plus-lenient-parse pattern that `judge.py` and `metrics.py` already use. Added `_extract_verdict_json` to handle a fenced or padded reply.
+- Set the classifier to temperature zero. It was the last LLM call in the system still running above zero. The salience judge and the eval scorer were already there.
+
+Verification: the offline contradiction checks pass. The live three-pair test on the strong model returns CORRECT, CONFIRM, UNRELATED, all correct, with clear reasons.
+
+A side effect worth noting. With the classifier at temperature zero, the run-to-run spread no longer comes from any judge or classifier call. It comes from the agents answering above temperature zero, which is the realistic source. The variance docstring and summary text were corrected to say so.
+
+What to expect. The strong classifier should lift the Berlin pass rate. Berlin is current truth: the agent says Berlin only when the sleep job correctly supersedes the Lagos trace, and that depends on `classify()` calling the pair CORRECT. Lagos is a different problem. A superseded trace is filtered out before the brief is built, so old history is only reachable when the user restates it. The model swap does not fix that. It is an architecture question for later.
+
+Result: recorded in the next entry.
+
+---
+
+## May 25, 2026. v4 result: strong classifier, and the superseded-memory gap.
+
+Ran the variance campaign on the strong contradiction classifier. Output in `reports/variance/v4_strong_classifier/`.
+
+Result across five full retail trials:
+- Sliding window accuracy: mean `0.00`, every run.
+- Recall Lab accuracy: min `0.80`, max `1.00`, mean `0.88`.
+- Range tightened from v3's `0.60` to `1.00`. The worst run improved.
+
+Per-question Recall Lab pass count:
+- favorite color: `5/5`
+- daughter peanut restriction: `5/5`
+- current shipping city Berlin: `5/5` (v3 was `4/5`)
+- historical shipping city Lagos: `2/5` (v3 was `3/5`)
+- history books: `5/5`
+
+Judge audit: `0` split verdicts out of `50`. Every answer unanimous. The one-call scorer is confirmed.
+
+Then I inspected the Lagos traces in all five runs. This is the part that matters.
+
+- run 1: FAIL, honest_gap. Only trace present: "User typically ships orders to Lagos", superseded.
+- run 2: PASS. Also has an active trace: "User previously lived in Lagos and frequently ordered goods there."
+- run 3: FAIL, honest_gap. Only the superseded Lagos trace.
+- run 4: FAIL, honest_gap. Only the superseded Lagos trace.
+- run 5: PASS. Also has an active trace: "User previously lived in Lagos and currently lives in Berlin."
+
+In all five runs the original "ships to Lagos" memory was superseded. The agent answered the history question correctly in exactly the two runs where the salience judge had also stored a separate, still-active "previously lived in Lagos" fact. In the other three only the superseded trace existed, and the agent honestly said it did not know.
+
+Read: the strong classifier did its job. The Lagos trace was superseded in 5 of 5 runs, so supersession is now reliable, and Berlin is `5/5` because of it. Berlin across v3 and v4 is `9/10`.
+
+The Lagos `3/5` to `2/5` move is not a classifier effect. It is judge-promotion luck. The classifier swap never touched the history path. The mean held at `0.88` only because Berlin gained a run and Lagos lost one. The mean hides the story; the per-question table is the story.
+
+The real finding, now proven in the traces: Recall Lab has no retrieval path to a superseded memory. Once a fact is superseded, `current_traces()` filters it out and the brief never shows it. The agent recalls old history only when a different, still-active trace happens to record it. History recall is a side effect of the user repeating themselves. It is not a designed capability.
+
+Next: give the agent a path to superseded memory. Render superseded traces into the brief under a separate past section, marked as history, never as current truth. Then rerun the campaign and watch Lagos.
+
+Item 6 done. Classifier on the strong model, supersession reliable.
+
+---
+
+## May 25, 2026. Past section: superseded memory is retrievable again.
+
+Built the fix for the superseded-memory gap from the v4 entry.
+
+The cause, restated: a corrected fact moves to `superseded`, `current_traces()` keeps only active traces, and `render_brief()` rendered only those. The superseded fact stayed in the trace store but never reached the brief. The agent reads the brief, so it could not see history.
+
+The change, three files:
+- `brief.py`: added a sixth section, "Past, no longer current".
+- `traces.py`, `render_brief`: it now also renders superseded traces, under the past section, each line prefixed "Previously:" so the present-tense wording is not read as current. Archived traces stay dropped.
+- `working.py`: one prompt line. The past section is history, used only when the user asks about the past, never as a current fact.
+
+No intent classifier. The agent reads the whole brief. A labeled current section and a labeled past section is enough for it to tell "now" from "before". A classifier would add an LLM call and a failure point for a job the answering model already does.
+
+Verified offline: an active trace renders as a current fact, a superseded trace renders under the past section marked "Previously:", an archived trace is dropped, and there are no duplicate or raw-key headings.
+
+Forgetting now removes authority, not the record.
+
+Result, pending: rerun the variance campaign as v5. Lagos should climb from 2/5 toward 5/5. Berlin should hold at 5/5. If Berlin drops, the agent is reading the past section as current and the label needs strengthening.
+
+---
+
+## May 25, 2026. v5 partial, the credit wall, and a missing token cap.
+
+Ran the v5 campaign on the past-section change. It stopped early.
+
+What completed. Two of five runs finished before the wall:
+- run 1: sliding `0.00`, Recall Lab `1.00`.
+- run 2: sliding `0.00`, Recall Lab `1.00`.
+
+Both completed runs passed all five questions, including the Lagos history question, `2/2`. In v4 that question was `2/5`. The past section is doing what it was meant to. Two runs is an early signal, not a result. The campaign needs the full five.
+
+What stopped it. Runs 3, 4, and 5 failed with an OpenRouter HTTP 402: "This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 65447." Not a crash. The account ran low on credit.
+
+The deeper cause. No LLM call in the repo set `max_tokens`. With no cap, OpenRouter pre-authorizes the model's full output budget, 65536 tokens for `claude-sonnet-4.6`, before every call. The real responses are a chat turn or a small JSON verdict, about 100 tokens. But the account has to hold credit for 65536. When the balance dropped below that hold, calls were rejected with credit still in the account.
+
+The fix:
+- Added `MAX_OUTPUT_TOKENS` to `config.py`, default `1024`, env override `RECALL_MAX_OUTPUT_TOKENS`.
+- Passed it on all five `create()` calls: the agent, the sliding-window control, the salience judge, the eval scorer, and the contradiction classifier.
+
+OpenRouter now pre-authorizes `1024` tokens per call, not `65536`. This does not lower the real spend. It removes a false wall and lets the balance run down to near zero before a 402.
+
+Verified offline: all six changed files compile and import, and every `create()` call carries the cap.
+
+Result, pending: add OpenRouter credit, then rerun the full v5 campaign and read the Lagos and Berlin pass rates.
+
+---
+
+## May 25, 2026. v5 result: the past section closes the history gap.
+
+Full campaign completed, 5 of 5 runs. The token cap held: no 402, the credit wall is gone.
+
+Result across five full retail trials:
+- Sliding window accuracy: `0.00` every run.
+- Recall Lab accuracy: `1.00` every run. 25 of 25 graded answers correct.
+
+Per-question Recall Lab pass count:
+- favorite color: `5/5`
+- daughter peanut restriction: `5/5`
+- current shipping city Berlin: `5/5`
+- historical shipping city Lagos: `5/5` (v4 was `2/5`)
+- history books: `5/5`
+
+Judge audit: `0` split verdicts out of `50`. Three campaigns now agree the one-call scorer is stable.
+
+Mechanism confirmed in the traces. Run 1's brief carries a section "## Past, no longer current" with the line "Previously: User (Amara) typically ships orders to Lagos." The agent answered the history question "You used to ship orders to Lagos." History recall now comes from the supersede chain rendered into the brief. In v4 it came from a redundant trace the salience judge minted by chance. v4 worked twice by luck. v5 works five times by design.
+
+Berlin held at `5/5`. The agent told current truth from past truth off the labeled brief, with no intent classifier. The labeled-section design held.
+
+Read, with the caveat. This is one scenario, five runs, a two-turn window that starves the baseline on purpose. 25 of 25 is a clean sweep on a narrow test, not a general claim. And the eval now has no headroom. A score of `1.00` means the retail scenario has nothing left to teach. The next experimental step is a harder scenario: multi-step corrections like Lagos to Berlin to Nairobi, longer gaps, and a question about the middle state.
+
+The scorer and the two architecture fixes from this stretch all came from trace evidence, not guesswork. Forgetting removes authority, the record stays. The history question is answered by design.
+

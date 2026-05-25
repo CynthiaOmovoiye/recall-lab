@@ -1,7 +1,8 @@
 """Consolidated brief: a living markdown document.
 
 Read first every turn. Sections: stable facts, active intents, open commitments,
-corrections, things to never repeat. Updated by the sleep job.
+corrections, things to never repeat, and past facts that have been superseded.
+Updated by the sleep job.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ DEFAULT_SECTIONS = [
     "Open commitments",
     "Corrections",
     "Things to never repeat",
+    "Past, no longer current",
 ]
 
 SECTION_ALIASES = {
@@ -26,6 +28,7 @@ SECTION_ALIASES = {
     "open_commitments": "Open commitments",
     "corrections": "Corrections",
     "never_repeat": "Things to never repeat",
+    "past": "Past, no longer current",
 }
 
 
