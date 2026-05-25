@@ -592,3 +592,26 @@ Verification, offline. The 16 unit tests still pass. Three direct checks: one co
 
 Result, pending: rerun `relocation_chain` as v7. Lagos should climb from `3/5`. Berlin and Nairobi should hold at `5/5`. The run-5 failure, a stale fact left active, should not recur.
 
+
+---
+
+## May 25, 2026. v8 patch: user-sourced salience and explicit past labels.
+
+v7 exposed two failures that the v6 summary had hidden.
+
+First, the salience judge was treating the agent answer as a source of user facts. The relocation scenario never has the user mention Lagos after day 1. When late Lagos traces appeared, they came from the agent recalling Lagos and the judge promoting that recalled answer as if the user had asserted it again. This is memory poisoning by the agent's own output.
+
+Fix: the salience prompt now has a source rule. Durable facts may be extracted only from the user turn. The agent turn is context for judging intent, not a source of new facts about the user.
+
+Second, the Past section still asked the agent to infer order from a flat list. Oldest-first helped the first-city question but hurt the right-before-current question. The list had one reliable slot, and moving the order traded one failure for another.
+
+Fix: the Past section now labels the chain explicitly:
+- `Earliest past: ...`
+- `Past step N: ...`
+- `Most recent past before current: ...`
+
+The working-memory prompt now tells the agent how to use those labels: earliest for first-ever questions, most recent past for right-before-current questions.
+
+Offline verification: 19 tests pass. Added a brief-render test that confirms a Lagos to Berlin to Nairobi chain renders Lagos as `Earliest past`, Berlin as `Most recent past before current`, and Nairobi as active current memory.
+
+Prediction for v8: Nairobi should hold at 5/5. Berlin should recover from v7's 1/5. Lagos should stay high if the judge stops re-promoting agent-recalled history as new user truth.
