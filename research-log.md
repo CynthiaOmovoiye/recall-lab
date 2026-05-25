@@ -615,3 +615,33 @@ The working-memory prompt now tells the agent how to use those labels: earliest 
 Offline verification: 19 tests pass. Added a brief-render test that confirms a Lagos to Berlin to Nairobi chain renders Lagos as `Earliest past`, Berlin as `Most recent past before current`, and Nairobi as active current memory.
 
 Prediction for v8: Nairobi should hold at 5/5. Berlin should recover from v7's 1/5. Lagos should stay high if the judge stops re-promoting agent-recalled history as new user truth.
+
+---
+
+## May 25, 2026. v8 result: source control fixed most of the chain, one lineage leak remains.
+
+Ran `v8_user_sourced_lineage` on the relocation-chain scenario after two patches:
+- the salience judge now extracts durable facts only from the user turn, not the agent turn.
+- the Past section now labels lineage explicitly: earliest past, middle steps, most recent past before current.
+
+Result across five runs:
+- Sliding window: `0.00` mean.
+- Recall Lab: `0.96` mean.
+- Current city Nairobi: `5/5`.
+- Right-before-current city Berlin: `4/5`.
+- First city Lagos: `5/5`.
+- Favorite color green: `5/5`.
+- Daughter shellfish restriction: `5/5`.
+
+Judge audit: one split out of 50, on a sliding-window failure. It did not affect Recall Lab scoring.
+
+The patches worked. Compared with v7, Recall Lab moved from `0.80` mean to `0.96`, Lagos recovered from `4/5` to `5/5`, and Berlin recovered from `1/5` to `4/5`.
+
+One failure remains. Run 1 still put a Lagos trace after Berlin in the Past section:
+- Earliest past: Lagos
+- Past step 2: Berlin
+- Most recent past before current: Lagos
+
+The agent then answered the right-before-current question with Lagos. The data was wrong, and the answer followed the data. This is no longer a prompt-order problem. It is a lineage construction problem: a stale Lagos trace can still enter the chain after Berlin, even with user-only salience. The next fix is not more prompt wording. The trace store needs topic-level lineage, so one shipping-address chain cannot accept an older city after a newer city unless the user explicitly reverts.
+
+Read: v8 validates the source-control patch and explicit labels, but multi-step memory now needs lineage constraints. The chain is close, not solved.
