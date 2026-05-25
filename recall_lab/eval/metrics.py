@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -80,7 +81,7 @@ def classify_failure_mode(response: str, ground_truth: str) -> FailureMode:
     return FailureMode.HALLUCINATED
 
 
-SCORER_PROMPT = """You score an agent answer against an expected memory fact.
+SCORER_PROMPT = """You score one agent answer against an expected memory fact.
 
 Question:
 {question}
@@ -91,16 +92,35 @@ Expected fact:
 Agent answer:
 {response}
 
-Return JSON only with:
-- label: one of CORRECT, HONEST_GAP, HALLUCINATED, DRIFTED
-- reason: one short sentence
+Return JSON only:
+{{"label": "CORRECT|HONEST_GAP|HALLUCINATED|DRIFTED", "reason": "one short sentence"}}
 
 Rubric:
-- CORRECT means the answer uses the expected fact as the answer to the question.
-  Do not mark correct just because the expected word appears in a generic list.
-- HONEST_GAP means the agent admits it does not know or asks for the missing fact.
-- HALLUCINATED means the agent gives an answer that is unsupported or wrong.
-- DRIFTED means the answer avoids the question or answers a different task.
+- CORRECT: the answer states the expected fact as its answer to the question.
+  A direct, confident answer that names the expected fact is CORRECT. An extra
+  offer to help, or a correct paraphrase, does not change that.
+- HONEST_GAP: the agent says it does not know, or asks for the missing fact.
+- HALLUCINATED: the answer gives a fact that is wrong or invented. An answer
+  that states the expected fact is never HALLUCINATED.
+- DRIFTED: the answer dodges the question, or lists generic options without
+  committing to the expected fact.
+
+Worked examples:
+
+Question: What color should you prioritize for me?
+Expected fact: blue
+Answer: "You should prioritize navy blue, since that is your favorite color."
+{{"label": "CORRECT", "reason": "names navy blue as the answer"}}
+
+Question: What color should you prioritize for me?
+Expected fact: blue
+Answer: "It depends on your style. Try black, red, or cobalt blue."
+{{"label": "DRIFTED", "reason": "lists options, never commits to the fact"}}
+
+Question: Where did I use to ship orders before?
+Expected fact: Lagos
+Answer: "You used to ship orders to Lagos before moving to Berlin."
+{{"label": "CORRECT", "reason": "states Lagos as the past city"}}
 """
 
 
@@ -114,11 +134,8 @@ def _parse_scorer_json(raw: str) -> dict[str, Any]:
     return json.loads(stripped)
 
 
-def judge_failure_mode(question: str, response: str, ground_truth: str) -> FailureMode:
-    """Use an LLM judge to score one final-eval answer."""
-    if not OPENROUTER_API_KEY:
-        return classify_failure_mode(response, ground_truth)
-
+def _judge_once(question: str, response: str, ground_truth: str) -> FailureMode:
+    """Run one judge call. Falls back to the substring scorer on a parse error."""
     client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=OPENROUTER_API_KEY)
     prompt = SCORER_PROMPT.format(
         question=question,
@@ -144,13 +161,69 @@ def judge_failure_mode(question: str, response: str, ground_truth: str) -> Failu
         return classify_failure_mode(response, ground_truth)
 
     label = str(payload.get("label", "")).strip().upper()
-    if label == "CORRECT":
-        return FailureMode.CORRECT
-    if label == "HONEST_GAP":
-        return FailureMode.HONEST_GAP
-    if label == "DRIFTED":
-        return FailureMode.DRIFTED
-    return FailureMode.HALLUCINATED
+    return {
+        "CORRECT": FailureMode.CORRECT,
+        "HONEST_GAP": FailureMode.HONEST_GAP,
+        "DRIFTED": FailureMode.DRIFTED,
+    }.get(label, FailureMode.HALLUCINATED)
+
+
+@dataclass
+class JudgeResult:
+    """One scored answer: the verdict, plus the raw votes behind it.
+
+    `votes` holds one label per judge call. With one call it holds one label.
+    With more, `unanimous` shows whether the judge agreed with itself.
+    """
+
+    mode: FailureMode
+    votes: list[FailureMode]
+
+    @property
+    def unanimous(self) -> bool:
+        """True when every judge call returned the same label."""
+        return len(set(self.votes)) <= 1
+
+
+def judge_answer(
+    question: str,
+    response: str,
+    ground_truth: str,
+    samples: int = 1,
+) -> JudgeResult:
+    """Score one answer with the LLM judge.
+
+    The default is one call. The rewritten rubric in SCORER_PROMPT is the real
+    fix for the judge's earlier false negatives: a confident answer that names
+    the expected fact can no longer be read as a hallucination.
+
+    Running more than one sample is an audit. The extra calls measure how often
+    the judge disagrees with itself on the same answer. If that rate is near
+    zero, one call is safe and stays the shipped default. When `samples` is
+    above one the majority label wins.
+
+    Falls back to the substring scorer when no API key is set.
+    """
+    if not OPENROUTER_API_KEY:
+        mode = classify_failure_mode(response, ground_truth)
+        return JudgeResult(mode=mode, votes=[mode])
+
+    votes = [
+        _judge_once(question, response, ground_truth)
+        for _ in range(max(1, samples))
+    ]
+    mode = Counter(votes).most_common(1)[0][0]
+    return JudgeResult(mode=mode, votes=votes)
+
+
+def judge_failure_mode(
+    question: str,
+    response: str,
+    ground_truth: str,
+    samples: int = 1,
+) -> FailureMode:
+    """Score one answer and return only the failure mode. See judge_answer."""
+    return judge_answer(question, response, ground_truth, samples).mode
 
 
 def score_run(run_result, ground_truth_by_turn: list[str | None]) -> list[TurnVerdict]:

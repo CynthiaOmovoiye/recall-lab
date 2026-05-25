@@ -314,3 +314,94 @@ Report outputs:
 - `reports/retail_memory_week_rescored/trial_result.json`
 - `reports/retail_memory_week_rescored/trial_report.md`
 
+---
+
+## May 24, 2026. Variance run, scorer false negatives, v3 ensemble judge.
+
+Ran the four-day both-agents trial 5 times to see how stable one result is. Added `recall_lab/eval/variance.py` to run the campaign and aggregate the spread.
+
+The v2 single-judge scorer reported:
+- Sliding window: `0.00` every run.
+- Recall Lab: `0.80` mean, `0.60` to `1.00` range.
+
+Then I read all 25 graded Recall Lab answers by hand. The judge mislabeled 4 of them.
+
+Receipt. Run 3 and run 4, same question, near-identical answers:
+- Run 3: "You should prioritize navy blue since it's your favorite color." Scored hallucinated.
+- Run 4: "You should prioritize navy blue since it's your favorite color!" Scored correct.
+
+Same answer, opposite verdict. The judge runs at temperature 0 and still flipped. Three more: run 5 color, and runs 2 and 5 for the Lagos question, all named the correct fact and were scored hallucinated.
+
+Hand-scored, the real result is 24 of 25 correct. One true miss: run 1, where the agent genuinely lacked the Lagos history and said so. That is an honest gap.
+
+Diagnosis. The v2 scorer had two faults. A systematic bias: the rubric line "do not mark correct just because the expected word appears" made the judge suspicious of correct answers that name the fact. And residual noise: separate temperature-0 calls returned different verdicts on the same input.
+
+Fix, v3 scorer in `metrics.py`:
+- Sharpened the rubric with three worked examples. A confident answer that names the expected fact scores CORRECT. A generic list scores DRIFTED. A correct historical answer scores CORRECT.
+- Added a majority vote over 3 judge calls. The rubric removes the bias. The vote removes the residual noise.
+- Kept the substring scorer as the no-API-key fallback only.
+
+Verification. Offline, the majority-vote logic passes on mocked verdicts. Live, the v3 scorer was run on the 4 answers v2 misjudged. All 4 now score CORRECT. The generic sliding-window answer still scores DRIFTED, so the fix did not bring back the old false positives. The run-1 honest gap still scores HONEST_GAP.
+
+The scorer has now been through three versions:
+- v1, substring match. Gave false positives. A generic answer that mentioned "cobalt blue" passed a color-recall question.
+- v2, single LLM judge. Removed the false positives, added false negatives. It failed correct recalls as hallucinations and flipped between runs.
+- v3, ensemble judge with a worked-example rubric. Removed both.
+
+Trail kept. The v2 campaign is archived at `reports/variance/v2_single_judge/`. The v3 rerun writes to `reports/variance/v3_ensemble_judge/`.
+
+Read: the variance run was meant to measure agent stability. It measured scorer stability instead. A single LLM-as-judge call is not a reliable oracle. The eval needs the same rigor as the system it grades.
+
+Result, v3 rerun: pending. Run `python -m recall_lab.eval.variance`, then record the spread and the per-question pass counts here.
+
+---
+
+## May 24, 2026. Scorer default reconsidered: one call, with an audit.
+
+The v3 fix above shipped a majority vote of 3 judge calls. On review that is the wrong default for a framework. Three calls on every grade reads as not trusting your own judge. It triples the cost. It treats the symptom.
+
+So the design changed.
+
+What is the real fix. The rewritten rubric, not the vote. When the v3 rubric was tested with a single call, all 4 answers the old judge had failed came back CORRECT, the generic list still scored DRIFTED, and the honest gap still scored HONEST_GAP. The prompt did the work. The vote did not.
+
+Why one call can hold. A better prompt does not make the model deterministic. It makes the right answer obvious. The judge only flips on borderline cases, where a vague prompt left it unsure. A sharp rubric with worked examples moves cases out of that borderline zone.
+
+The new design:
+- `judge_failure_mode` defaults to one judge call. That is what ships.
+- `judge_answer` returns the verdict plus the raw votes, so callers can audit.
+- The variance runner scores with 3 calls on purpose. That is an audit, not the default. The summary now reports how often the 3 calls split.
+- If the split rate is near zero, one call is confirmed safe and the audit can be retired. If it is not, the audit shows the vote earns its place.
+
+The decision is not made by opinion. The variance run measures it.
+
+The scorer arc for the post is now four steps: substring match, false positives. Single LLM judge, false negatives. Ensemble vote, correct but heavy. Sharper rubric with the vote demoted to a one-time audit.
+
+Result, audited v3 rerun: pending. Run `python -m recall_lab.eval.variance`. Record the spread, the per-question pass counts, and the judge audit split rate here.
+---
+
+## May 25, 2026. Variance run and scorer audit.
+
+Ran the audited variance campaign after demoting the scorer back to one call by default. The variance campaign still uses three scorer calls per final answer as an audit, then records whether the judge agreed with itself.
+
+Result across five full retail trials:
+- Sliding window accuracy: min `0.00`, max `0.00`, mean `0.00`
+- Recall Lab accuracy: min `0.60`, max `1.00`, mean `0.88`
+
+Per-question Recall Lab pass count:
+- favorite color: `5/5`
+- daughter peanut restriction: `5/5`
+- current shipping city Berlin: `4/5`
+- historical shipping city Lagos: `3/5`
+- history books: `5/5`
+
+Judge audit:
+- 50 graded answers
+- 1 split verdict
+- split case: sliding-window answer to `What kind of books do I like?`, votes `drifted`, `honest_gap`, `honest_gap`
+
+Read: the stronger scorer prompt made one-call grading mostly stable. The audit found a `2%` split rate, and the only split did not affect correctness because both labels were failures. The experimental result is now clearer: Recall Lab reliably beats the two-turn sliding window in this synthetic retail trial, but historical memory remains weaker than current truth and safety constraints.
+
+Local reports:
+- `reports/variance/v3_ensemble_judge/variance_summary.md`
+- `reports/variance/v3_ensemble_judge/run_1` through `run_5`
+

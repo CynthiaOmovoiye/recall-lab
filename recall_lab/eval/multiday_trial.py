@@ -23,7 +23,7 @@ from typing import Any, Literal
 from recall_lab.agent import RecallAgent
 from recall_lab.consolidation.sleep import run_sleep_job
 from recall_lab.controls.sliding import SlidingWindowAgent
-from recall_lab.eval.metrics import FailureMode, estimate_tokens, judge_failure_mode
+from recall_lab.eval.metrics import FailureMode, estimate_tokens, judge_answer
 from recall_lab.memory.brief import Brief
 from recall_lab.memory.episodic import EpisodicLog
 from recall_lab.memory.traces import MemoryTraceStore
@@ -46,6 +46,7 @@ class AnswerRecord:
     failure_mode: str | None = None
     correct: bool | None = None
     output_tokens_estimate: int = 0
+    judge_votes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -117,15 +118,24 @@ class TrialClock:
         return self.current
 
 
-def score_answer(question: str, response: str, expected: str) -> tuple[bool, FailureMode]:
-    """Score one final-eval answer with the LLM judge."""
-    mode = judge_failure_mode(question, response, expected)
-    return mode == FailureMode.CORRECT, mode
+def score_answer(
+    question: str, response: str, expected: str, judge_samples: int
+) -> tuple[bool, FailureMode, list[str]]:
+    """Score one final-eval answer with the LLM judge.
+
+    Returns whether it is correct, the failure mode, and the raw judge votes.
+    With judge_samples above one the votes show whether the judge agreed with
+    itself. That is the audit behind the single-call default.
+    """
+    result = judge_answer(question, response, expected, samples=judge_samples)
+    votes = [vote.value for vote in result.votes]
+    return result.mode == FailureMode.CORRECT, result.mode, votes
 
 
 def run_sliding_trial(
     scenario: dict[str, Any],
     days: list[dict[str, Any]],
+    judge_samples: int = 1,
     verbose: bool = False,
 ) -> AgentTrialResult:
     """Run the full scenario through the sliding-window baseline."""
@@ -160,7 +170,7 @@ def run_sliding_trial(
         if verbose:
             print(f"[sliding] {eval_label}: question {i}/{len(questions)}")
         response = agent.respond(question)
-        correct, mode = score_answer(question, response, expected)
+        correct, mode, votes = score_answer(question, response, expected, judge_samples)
         result.records.append(
             AnswerRecord(
                 phase="final_eval",
@@ -171,6 +181,7 @@ def run_sliding_trial(
                 expected=expected,
                 failure_mode=mode.value,
                 correct=correct,
+                judge_votes=votes,
                 output_tokens_estimate=estimate_tokens(response),
             )
         )
@@ -182,6 +193,7 @@ def run_recall_trial(
     scenario: dict[str, Any],
     days: list[dict[str, Any]],
     out_dir: Path,
+    judge_samples: int = 1,
     verbose: bool = False,
 ) -> AgentTrialResult:
     """Run the full scenario through the brief-backed Recall agent."""
@@ -240,7 +252,7 @@ def run_recall_trial(
             print(f"[recall] {eval_label}: question {i}/{len(questions)}")
         clock.set(eval_time + timedelta(minutes=i))
         response = agent.respond(question)
-        correct, mode = score_answer(question, response, expected)
+        correct, mode, votes = score_answer(question, response, expected, judge_samples)
         result.records.append(
             AnswerRecord(
                 phase="final_eval",
@@ -251,6 +263,7 @@ def run_recall_trial(
                 expected=expected,
                 failure_mode=mode.value,
                 correct=correct,
+                judge_votes=votes,
                 output_tokens_estimate=estimate_tokens(response),
             )
         )
@@ -319,14 +332,17 @@ def write_markdown_report(payload: dict[str, Any], path: Path) -> None:
         lines.extend([f"### {agent['agent_name']}", ""])
         for record in agent["final_eval"]:
             status = "PASS" if record["correct"] else "FAIL"
-            lines.extend(
-                [
-                    f"- {status}: {record['user']}",
-                    f"  - expected: {record['expected']}",
-                    f"  - mode: {record['failure_mode']}",
-                    f"  - answer: {record['agent']}",
-                ]
-            )
+            entry = [
+                f"- {status}: {record['user']}",
+                f"  - expected: {record['expected']}",
+                f"  - mode: {record['failure_mode']}",
+            ]
+            votes = record.get("judge_votes") or []
+            if len(votes) > 1:
+                agree = "unanimous" if len(set(votes)) == 1 else "split"
+                entry.append(f"  - judge votes ({agree}): {', '.join(votes)}")
+            entry.append(f"  - answer: {record['agent']}")
+            lines.extend(entry)
         lines.append("")
 
     for agent in payload["agents"]:
@@ -355,6 +371,7 @@ def run_trial(
     agents: AgentChoice = "both",
     max_days: int | None = None,
     clean: bool = True,
+    judge_samples: int = 1,
     verbose: bool = False,
 ) -> dict[str, Any]:
     """Run a configurable trial and write JSON plus markdown outputs."""
@@ -364,9 +381,15 @@ def run_trial(
 
     results: list[AgentTrialResult] = []
     if agents in {"sliding", "both"}:
-        results.append(run_sliding_trial(scenario, days, verbose=verbose))
+        results.append(
+            run_sliding_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
+        )
     if agents in {"recall", "both"}:
-        results.append(run_recall_trial(scenario, days, out_dir, verbose=verbose))
+        results.append(
+            run_recall_trial(
+                scenario, days, out_dir, judge_samples=judge_samples, verbose=verbose
+            )
+        )
 
     payload = result_payload(scenario, days, results)
     (out_dir / "trial_result.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -380,6 +403,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--agents", choices=["sliding", "recall", "both"], default="both")
     parser.add_argument("--max-days", type=int, default=None)
+    parser.add_argument(
+        "--judge-samples",
+        type=int,
+        default=1,
+        help="Judge calls per answer. 1 ships. Use 3 to audit judge disagreement.",
+    )
     parser.add_argument("--verbose", action="store_true", help="Print progress while running.")
     parser.add_argument(
         "--no-clean",
@@ -397,6 +426,7 @@ def main() -> None:
         agents=args.agents,
         max_days=args.max_days,
         clean=not args.no_clean,
+        judge_samples=args.judge_samples,
         verbose=args.verbose,
     )
 
