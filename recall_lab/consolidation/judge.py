@@ -4,6 +4,11 @@ Given an exchange, returns a salience score in [0, 1] plus a one-line reason.
 Inputs to the score: recency, goal-relevance, correction signal, user-stated
 importance.
 
+The judge scores the user turn only. The agent turn is never passed to it.
+Earlier the judge saw both turns and was asked to ignore agent-stated facts. It
+did not always comply, and a fact the agent merely recalled would get filed as
+fresh user memory. Hiding the agent turn makes the rule hold every time.
+
 The judge is intentionally simple. The goal of Recall Lab is not to build a
 clever judge but to test whether selective forgetting at any reasonable
 threshold beats storing everything.
@@ -39,24 +44,21 @@ VALID_SECTIONS = {
     "never_repeat",
 }
 
-JUDGE_PROMPT = """You score conversation exchanges for salience.
+JUDGE_PROMPT = """You score one user turn for salience.
 
-For the exchange below, return JSON with these fields:
+You see only what the user said. Score how important it is to remember
+long-term, and return JSON with these fields:
 - score: float in [0,1]. Higher = more important to remember long-term.
 - reason: one short sentence.
 - suggested_brief_section: one of stable_facts | active_intents | open_commitments
   | corrections | never_repeat | null.
-- suggested_statement: a single compressed semantic sentence to file under that section.
-  Use null if score < 0.5.
+- suggested_statement: a single compressed semantic sentence to file under that
+  section. Use null if score < 0.5.
 
-Critical source rule:
-- Extract durable facts only from the USER text.
-- Treat the AGENT text as context for judging the user's intent, not as a source
-  of new facts about the user.
-- If the agent mentions a fact that the user did not assert in this turn, do not
-  file that fact as a new memory.
+The statement must come from what the user said in this turn. Do not file a fact
+the user did not state.
 
-Score high when the exchange:
+Score high when the user turn:
 - States a stable fact about the user
 - Names an active intent or goal
 - Records a commitment
@@ -65,9 +67,8 @@ Score high when the exchange:
 
 Score low for chit-chat, restatements, and ephemeral context.
 
-Exchange:
-USER: {user}
-AGENT: {agent}
+User turn:
+{user}
 """
 
 
@@ -133,7 +134,7 @@ def score_exchange(exchange: Exchange) -> SalienceVerdict:
         api_key=OPENROUTER_API_KEY,
     )
 
-    prompt = JUDGE_PROMPT.format(user=exchange.user, agent=exchange.agent)
+    prompt = JUDGE_PROMPT.format(user=exchange.user)
     completion = client.chat.completions.create(
         model=JUDGE_MODEL,
         messages=[
