@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from recall_lab.config import CONTRADICTION_COMPARE_LIMIT, SALIENCE_THRESHOLD
-from recall_lab.consolidation.activation import MemoryTrace, activation
+from recall_lab.config import SALIENCE_THRESHOLD
+from recall_lab.consolidation.activation import MemoryTrace
 from recall_lab.consolidation.contradiction import (
     CONFIRM,
     CORRECT,
@@ -48,32 +48,55 @@ def _integrate_trace(
     traces: list[MemoryTrace],
     now: datetime,
 ) -> str:
-    """Merge one new trace into memory using contradiction and activation.
+    """Merge one new trace into memory using the contradiction check.
+
+    The new trace is compared against every active trace, not a ranked subset.
+    A stale fact has low activation, so ranking by activation and keeping the
+    top few is exactly where a stale fact hides. Every active trace the new
+    trace corrects is superseded, not only the first one found. A multi-step
+    correction chain needs both of those.
+
+    At larger scale this O(active traces) scan needs topic scoping by embedding
+    similarity. An activation-ranked cap is the wrong scoping, because it drops
+    the stale traces a correction is meant to catch.
 
     Returns a compact action label for reporting:
     - added: no active memory conflicted with the new trace
-    - confirmed: an active memory matched, so it got a reference bump
-    - corrected: an active memory was superseded by the new trace
+    - confirmed: an active memory already says this, so it got a reference bump
+      and the duplicate was dropped
+    - corrected: the new trace superseded one or more active memories
     """
     active = [trace for trace in traces if trace.status == "active"]
-    active = sorted(active, key=lambda trace: activation(trace, now), reverse=True)
-    active = active[:CONTRADICTION_COMPARE_LIMIT]
+
+    confirmed_trace: MemoryTrace | None = None
+    corrections: list[tuple[MemoryTrace, object]] = []
 
     for old_trace in active:
         verdict = classify(old_trace.compression, new_trace.compression)
 
         if verdict.label == CONFIRM:
-            old_trace.references.append(new_trace.created_at)
-            return "confirmed"
+            if confirmed_trace is None:
+                confirmed_trace = old_trace
+        elif verdict.label == CORRECT:
+            corrections.append((old_trace, verdict))
 
-        if verdict.label == CORRECT:
-            transition = supersede(old_trace, new_trace, verdict, now=now)
+    if confirmed_trace is not None:
+        # The fact is already on file. Reinforce the canonical trace and drop
+        # the duplicate new trace. If the same incoming fact also corrects stale
+        # active traces, point those stale traces at the stored canonical trace,
+        # not at a duplicate that will not be saved.
+        confirmed_trace.references.append(new_trace.created_at)
+        for old_trace, verdict in corrections:
+            transition = supersede(old_trace, confirmed_trace, verdict, now=now)
             append_transition(transition)
-            traces.append(new_trace)
-            return "corrected"
+        return "corrected" if corrections else "confirmed"
+
+    for old_trace, verdict in corrections:
+        transition = supersede(old_trace, new_trace, verdict, now=now)
+        append_transition(transition)
 
     traces.append(new_trace)
-    return "added"
+    return "corrected" if corrections else "added"
 
 
 def run_sleep_job(
@@ -137,7 +160,6 @@ def run_sleep_job(
         "confirmed": confirmed,
         "corrected": corrected,
         "skipped": skipped,
-        "compare_limit": CONTRADICTION_COMPARE_LIMIT,
         "active_traces": len(trace_store.active()),
         "total_traces": len(trace_store.load()),
         "threshold": SALIENCE_THRESHOLD,

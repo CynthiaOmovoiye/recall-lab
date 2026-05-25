@@ -541,3 +541,54 @@ Read, with the caveat. This is one scenario, five runs, a two-turn window that s
 
 The scorer and the two architecture fixes from this stretch all came from trace evidence, not guesswork. Forgetting removes authority, the record stays. The history question is answered by design.
 
+---
+
+## May 25, 2026. v6 relocation chain: two gaps in multi-step history.
+
+Ran the harder scenario. `relocation_chain` is a two-step correction: Lagos to Berlin to Nairobi. Five runs.
+
+Result:
+- Sliding window: `0.00` every run.
+- Recall Lab: mean `0.92`, runs `1.00, 0.80, 1.00, 1.00, 0.80`.
+- Current city Nairobi: `5/5`.
+- Previous city Berlin: `5/5`.
+- First city Lagos: `3/5`.
+- Color and shellfish controls: `5/5` each.
+- Judge audit: `0` of `50` split.
+
+The scenario did its job. It found two gaps, and they are not the same gap.
+
+Gap A, ordering. Run 2 failed Lagos with the chain fully resolved. Both the Lagos and Berlin traces were superseded, and both rendered in the Past section. But the Past section is a flat list, sorted by activation. "Previously: Berlin" and "Previously: Lagos" carry no order. Asked for the first city, the agent could not tell which past city came first, and said it did not know. The activation sort floats the most recent past to the top, which is why "right before current" passes `5/5`. That is an implicit order. There is no explicit one, so "first ever" is an inference the agent makes only some of the time.
+
+Gap B, chain resolution. Run 5 failed Lagos for a different reason. The two-step correction did not resolve. The Lagos trace ended up active, not superseded. The brief carried "User's shipping address is Lagos" and "User's current shipping address is Nairobi" as current facts at the same time. Lagos never reached the Past section. The likely cause is the contradiction compare limit. `classify()` checks each new trace against the top three active traces by activation. The salience judge mints several near-duplicate shipping traces. When the Nairobi correction arrived, a Lagos trace sat outside the compare window and was never superseded. The mechanism is worth confirming. The outcome is certain: a stale fact stayed marked current.
+
+Read. Gap A is a rendering problem. The data is right and the order is missing. Gap B is a correctness problem. The data is wrong and a stale fact reads as current. Gap B comes first. Nairobi passed `5/5`, but in run 5 it passed despite a contradictory brief, because the corrections line is emphatic. Current truth is not solved yet. In run 5 it survived a broken memory state.
+
+Fix directions:
+- Gap A: render the Past section as an ordered lineage. Walk the supersede pointers, render oldest to newest, label the first city and the current one. Then "first city" and "before current" are both explicit.
+- Gap B: a correction should supersede every active trace on the same topic, not only the top three by activation. Dedupe near-identical traces before the contradiction pass. The compare limit of three was a cost choice. It is now a correctness bug.
+
+Also fixed: the variance summary title was hardcoded to `retail_memory_week`. It now reads the scenario name from the run.
+
+Result, pending: fix Gap B, then Gap A, then rerun `relocation_chain` as v7.
+
+---
+
+## May 25, 2026. Fixing the two relocation-chain gaps.
+
+Both gaps from the v6 entry are now fixed in code.
+
+Gap B, chain resolution. The bug was in `_integrate_trace`. When a new trace arrived, it compared the trace against the top three active traces ranked by activation, and it superseded only the first contradicting trace it found, then returned.
+
+Two faults in one function. A stale fact has low activation, so ranking by activation and keeping the top three drops exactly the traces a correction is meant to catch. And returning after the first correction leaves any other stale trace untouched. A two-step chain, Lagos to Berlin to Nairobi, needs the Nairobi correction to supersede every stale shipping trace at once.
+
+The fix. `_integrate_trace` now compares the new trace against every active trace, and supersedes every one it corrects. The activation-ranked cap is removed. `CONTRADICTION_COMPARE_LIMIT` is gone from the config.
+
+A cost note, because the cap was a cost guard. Comparing against every active trace also makes CONFIRM dedup reliable. A duplicate now always meets the trace it duplicates and gets dropped instead of stored. Fewer duplicates means a smaller active set, which means the all-traces scan stays cheap. The cap was suppressing dedup, which grew the active set, which is the cost it was meant to control. At real scale the right scoping is embedding similarity by topic, not an activation rank.
+
+Gap A, ordered lineage. The Past section rendered superseded traces ranked by activation, so the order was implicit and recency-shaped. The fix renders them oldest first, sorted by `created_at`. The agent prompt now states the section is ordered oldest first, the first item earliest, the last item the most recent past. "First city" is the first entry. "City before current" is the last entry. Both are explicit.
+
+Verification, offline. The 16 unit tests still pass. Three direct checks: one correction superseded both stale traces in a two-step chain, a duplicate trace was dropped and the original got a reference bump, and the Past section rendered Lagos before Berlin by creation time.
+
+Result, pending: rerun `relocation_chain` as v7. Lagos should climb from `3/5`. Berlin and Nairobi should hold at `5/5`. The run-5 failure, a stale fact left active, should not recur.
+

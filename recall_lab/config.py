@@ -42,4 +42,3 @@ BRIEF_MAX_TOKENS = 2000  # cap on the consolidated brief size
 # Salience scoring
 SALIENCE_THRESHOLD = 0.5  # below this, exchange is not promoted to brief
 DECAY_HALF_LIFE_DAYS = 14  # used in Forgetting Curves Lab (secondary experiment)
-CONTRADICTION_COMPARE_LIMIT = int(os.environ.get("RECALL_CONTRADICTION_COMPARE_LIMIT", "3"))

@@ -70,8 +70,7 @@ class MemoryTraceStore:
 
         superseded = sorted(
             (t for t in all_traces if t.status == MemoryStatus.SUPERSEDED.value),
-            key=lambda trace: activation(trace, now),
-            reverse=True,
+            key=lambda trace: trace.created_at,
         )
         past_section = SECTION_ALIASES["past"]
         for trace in superseded:
