@@ -665,3 +665,65 @@ The cost is small. The judge loses the agent turn as scoring context. Durable us
 Verified offline: judge.py compiles, the agent placeholder is gone from the prompt, `format(user=...)` works without a missing key, and the 19 tests pass.
 
 Result, pending: rerun `relocation_chain` as v9. The run-1 leak should not recur. Berlin should reach `5/5`. If a clean run still corrupts the chain through a different path, a user turn the judge mis-reads for example, that is when the lineage constraint earns its place.
+
+---
+
+## May 26, 2026. v9 result: user-only salience closes the relocation chain.
+
+Ran the relocation-chain variance campaign after making the salience judge structurally user-only.
+
+Command:
+
+```bash
+python -m recall_lab.eval.variance --scenario scenarios/relocation_chain.json --label v9_user_only_judge
+```
+
+Result across five runs:
+- Sliding window: `0.00` mean, every run.
+- Recall Lab: `1.00` mean, every run.
+- Current city Nairobi: `5/5`.
+- Right-before-current city Berlin: `5/5`.
+- First city Lagos: `5/5`.
+- Favorite color green: `5/5`.
+- Daughter shellfish restriction: `5/5`.
+- Judge audit: `0` split verdicts out of `50` graded answers.
+
+The run-1 leak from v8 did not recur. The judge cannot promote agent-generated history if the agent turn is not in its prompt.
+
+Trace read: the chain is clean. Lagos is superseded. Berlin is superseded. Nairobi remains active. The Past section renders a two-entry lineage: earliest past Lagos, most recent past before current Berlin. The agent uses those labels correctly.
+
+Read. The structural source boundary fixed the memory-poisoning bug. The system no longer turns its own recalled answer into fresh user memory.
+
+This also changes the lineage-constraint question. A topic-level lineage constraint is still a plausible future backstop, but v9 shows it is not needed for the failure observed in v8. The root problem was source leakage, not lineage policy.
+
+Current public claim, scoped tightly:
+
+On two synthetic multi-day scenarios, a brief-backed memory system with validity state, a Past section, and user-only salience beats a two-turn sliding-window baseline. This is a mechanism result, not a benchmark.
+
+What remains before stronger claims:
+- vector retrieval control
+- long-context control
+- larger scenario set
+- equal-token-budget baseline
+- human-curated and random-curated brief controls
+- decay policy
+
+The next build should not make the current scenario easier. Both retail v5 and relocation v9 are maxed at `1.00`. The next useful experiment needs a harder scenario or a new control.
+
+---
+
+## May 26, 2026. Documentation sync after v9.
+
+Updated `README.md` to match the actual system state.
+
+The README now records:
+- user-only salience judge
+- `Past, no longer current` brief section
+- explicit past-lineage labels
+- retail v5 result
+- relocation-chain v9 result
+- judge audit status
+- current incomplete controls
+- the scoped public claim
+
+This matters because the repo had drifted. It still said the full four-day retail trial and sliding-window comparison were incomplete, even though both the retail and relocation-chain campaigns had completed. The README now tells the same story as the code and the research log.
