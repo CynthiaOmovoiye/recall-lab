@@ -10,6 +10,7 @@ are compared against.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from openai import OpenAI
@@ -33,10 +34,12 @@ class RecallAgent:
         brief: Brief,
         log: EpisodicLog,
         working_window: int = WORKING_MAX_TURNS,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.brief = brief
         self.log = log
         self.working_window = working_window
+        self.clock = clock or (lambda: datetime.now(UTC))
         self.recent_turns: list[dict] = []
 
     def respond(self, user_message: str) -> str:
@@ -74,7 +77,7 @@ class RecallAgent:
             Exchange(
                 user=user_message,
                 agent=response,
-                timestamp=datetime.now(UTC),
+                timestamp=self.clock(),
             )
         )
         self.recent_turns.append({"user": user_message, "agent": response})
