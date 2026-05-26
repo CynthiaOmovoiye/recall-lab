@@ -405,3 +405,325 @@ Local reports:
 - `reports/variance/v3_ensemble_judge/variance_summary.md`
 - `reports/variance/v3_ensemble_judge/run_1` through `run_5`
 
+---
+
+## May 25, 2026. Item 6: contradiction classifier moved to the strong model.
+
+The audited variance run showed every Recall Lab miss sat on the Lagos-to-Berlin correction. Color, peanut, and books passed 5 of 5. Current city Berlin passed 4 of 5. Old city Lagos passed 3 of 5. The plain stored facts never failed. The correction did.
+
+The correction is decided by `contradiction.classify()`. That call was running on `gpt-4o-mini`, the cheap agent model. The weak spot in the result and the weak model in the code were the same place.
+
+What changed:
+- Added `CONTRADICTION_MODEL` to `config.py`. It defaults to the judge model, `claude-sonnet-4.6`, and takes an env override, `RECALL_CONTRADICTION_MODEL`.
+- `classify()` now uses it. Spotting an implicit correction is the hardest reasoning call in the system. The STALE paper logged on 2026-05-24 is built around that exact case. It belongs on the strong model.
+- Dropped the `response_format` JSON-object parameter. It suited the cheap model. The strong model uses the system-message-plus-lenient-parse pattern that `judge.py` and `metrics.py` already use. Added `_extract_verdict_json` to handle a fenced or padded reply.
+- Set the classifier to temperature zero. It was the last LLM call in the system still running above zero. The salience judge and the eval scorer were already there.
+
+Verification: the offline contradiction checks pass. The live three-pair test on the strong model returns CORRECT, CONFIRM, UNRELATED, all correct, with clear reasons.
+
+A side effect worth noting. With the classifier at temperature zero, the run-to-run spread no longer comes from any judge or classifier call. It comes from the agents answering above temperature zero, which is the realistic source. The variance docstring and summary text were corrected to say so.
+
+What to expect. The strong classifier should lift the Berlin pass rate. Berlin is current truth: the agent says Berlin only when the sleep job correctly supersedes the Lagos trace, and that depends on `classify()` calling the pair CORRECT. Lagos is a different problem. A superseded trace is filtered out before the brief is built, so old history is only reachable when the user restates it. The model swap does not fix that. It is an architecture question for later.
+
+Result: recorded in the next entry.
+
+---
+
+## May 25, 2026. v4 result: strong classifier, and the superseded-memory gap.
+
+Ran the variance campaign on the strong contradiction classifier. Output in `reports/variance/v4_strong_classifier/`.
+
+Result across five full retail trials:
+- Sliding window accuracy: mean `0.00`, every run.
+- Recall Lab accuracy: min `0.80`, max `1.00`, mean `0.88`.
+- Range tightened from v3's `0.60` to `1.00`. The worst run improved.
+
+Per-question Recall Lab pass count:
+- favorite color: `5/5`
+- daughter peanut restriction: `5/5`
+- current shipping city Berlin: `5/5` (v3 was `4/5`)
+- historical shipping city Lagos: `2/5` (v3 was `3/5`)
+- history books: `5/5`
+
+Judge audit: `0` split verdicts out of `50`. Every answer unanimous. The one-call scorer is confirmed.
+
+Then I inspected the Lagos traces in all five runs. This is the part that matters.
+
+- run 1: FAIL, honest_gap. Only trace present: "User typically ships orders to Lagos", superseded.
+- run 2: PASS. Also has an active trace: "User previously lived in Lagos and frequently ordered goods there."
+- run 3: FAIL, honest_gap. Only the superseded Lagos trace.
+- run 4: FAIL, honest_gap. Only the superseded Lagos trace.
+- run 5: PASS. Also has an active trace: "User previously lived in Lagos and currently lives in Berlin."
+
+In all five runs the original "ships to Lagos" memory was superseded. The agent answered the history question correctly in exactly the two runs where the salience judge had also stored a separate, still-active "previously lived in Lagos" fact. In the other three only the superseded trace existed, and the agent honestly said it did not know.
+
+Read: the strong classifier did its job. The Lagos trace was superseded in 5 of 5 runs, so supersession is now reliable, and Berlin is `5/5` because of it. Berlin across v3 and v4 is `9/10`.
+
+The Lagos `3/5` to `2/5` move is not a classifier effect. It is judge-promotion luck. The classifier swap never touched the history path. The mean held at `0.88` only because Berlin gained a run and Lagos lost one. The mean hides the story; the per-question table is the story.
+
+The real finding, now proven in the traces: Recall Lab has no retrieval path to a superseded memory. Once a fact is superseded, `current_traces()` filters it out and the brief never shows it. The agent recalls old history only when a different, still-active trace happens to record it. History recall is a side effect of the user repeating themselves. It is not a designed capability.
+
+Next: give the agent a path to superseded memory. Render superseded traces into the brief under a separate past section, marked as history, never as current truth. Then rerun the campaign and watch Lagos.
+
+Item 6 done. Classifier on the strong model, supersession reliable.
+
+---
+
+## May 25, 2026. Past section: superseded memory is retrievable again.
+
+Built the fix for the superseded-memory gap from the v4 entry.
+
+The cause, restated: a corrected fact moves to `superseded`, `current_traces()` keeps only active traces, and `render_brief()` rendered only those. The superseded fact stayed in the trace store but never reached the brief. The agent reads the brief, so it could not see history.
+
+The change, three files:
+- `brief.py`: added a sixth section, "Past, no longer current".
+- `traces.py`, `render_brief`: it now also renders superseded traces, under the past section, each line prefixed "Previously:" so the present-tense wording is not read as current. Archived traces stay dropped.
+- `working.py`: one prompt line. The past section is history, used only when the user asks about the past, never as a current fact.
+
+No intent classifier. The agent reads the whole brief. A labeled current section and a labeled past section is enough for it to tell "now" from "before". A classifier would add an LLM call and a failure point for a job the answering model already does.
+
+Verified offline: an active trace renders as a current fact, a superseded trace renders under the past section marked "Previously:", an archived trace is dropped, and there are no duplicate or raw-key headings.
+
+Forgetting now removes authority, not the record.
+
+Result, pending: rerun the variance campaign as v5. Lagos should climb from 2/5 toward 5/5. Berlin should hold at 5/5. If Berlin drops, the agent is reading the past section as current and the label needs strengthening.
+
+---
+
+## May 25, 2026. v5 partial, the credit wall, and a missing token cap.
+
+Ran the v5 campaign on the past-section change. It stopped early.
+
+What completed. Two of five runs finished before the wall:
+- run 1: sliding `0.00`, Recall Lab `1.00`.
+- run 2: sliding `0.00`, Recall Lab `1.00`.
+
+Both completed runs passed all five questions, including the Lagos history question, `2/2`. In v4 that question was `2/5`. The past section is doing what it was meant to. Two runs is an early signal, not a result. The campaign needs the full five.
+
+What stopped it. Runs 3, 4, and 5 failed with an OpenRouter HTTP 402: "This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 65447." Not a crash. The account ran low on credit.
+
+The deeper cause. No LLM call in the repo set `max_tokens`. With no cap, OpenRouter pre-authorizes the model's full output budget, 65536 tokens for `claude-sonnet-4.6`, before every call. The real responses are a chat turn or a small JSON verdict, about 100 tokens. But the account has to hold credit for 65536. When the balance dropped below that hold, calls were rejected with credit still in the account.
+
+The fix:
+- Added `MAX_OUTPUT_TOKENS` to `config.py`, default `1024`, env override `RECALL_MAX_OUTPUT_TOKENS`.
+- Passed it on all five `create()` calls: the agent, the sliding-window control, the salience judge, the eval scorer, and the contradiction classifier.
+
+OpenRouter now pre-authorizes `1024` tokens per call, not `65536`. This does not lower the real spend. It removes a false wall and lets the balance run down to near zero before a 402.
+
+Verified offline: all six changed files compile and import, and every `create()` call carries the cap.
+
+Result, pending: add OpenRouter credit, then rerun the full v5 campaign and read the Lagos and Berlin pass rates.
+
+---
+
+## May 25, 2026. v5 result: the past section closes the history gap.
+
+Full campaign completed, 5 of 5 runs. The token cap held: no 402, the credit wall is gone.
+
+Result across five full retail trials:
+- Sliding window accuracy: `0.00` every run.
+- Recall Lab accuracy: `1.00` every run. 25 of 25 graded answers correct.
+
+Per-question Recall Lab pass count:
+- favorite color: `5/5`
+- daughter peanut restriction: `5/5`
+- current shipping city Berlin: `5/5`
+- historical shipping city Lagos: `5/5` (v4 was `2/5`)
+- history books: `5/5`
+
+Judge audit: `0` split verdicts out of `50`. Three campaigns now agree the one-call scorer is stable.
+
+Mechanism confirmed in the traces. Run 1's brief carries a section "## Past, no longer current" with the line "Previously: User (Amara) typically ships orders to Lagos." The agent answered the history question "You used to ship orders to Lagos." History recall now comes from the supersede chain rendered into the brief. In v4 it came from a redundant trace the salience judge minted by chance. v4 worked twice by luck. v5 works five times by design.
+
+Berlin held at `5/5`. The agent told current truth from past truth off the labeled brief, with no intent classifier. The labeled-section design held.
+
+Read, with the caveat. This is one scenario, five runs, a two-turn window that starves the baseline on purpose. 25 of 25 is a clean sweep on a narrow test, not a general claim. And the eval now has no headroom. A score of `1.00` means the retail scenario has nothing left to teach. The next experimental step is a harder scenario: multi-step corrections like Lagos to Berlin to Nairobi, longer gaps, and a question about the middle state.
+
+The scorer and the two architecture fixes from this stretch all came from trace evidence, not guesswork. Forgetting removes authority, the record stays. The history question is answered by design.
+
+---
+
+## May 25, 2026. v6 relocation chain: two gaps in multi-step history.
+
+Ran the harder scenario. `relocation_chain` is a two-step correction: Lagos to Berlin to Nairobi. Five runs.
+
+Result:
+- Sliding window: `0.00` every run.
+- Recall Lab: mean `0.92`, runs `1.00, 0.80, 1.00, 1.00, 0.80`.
+- Current city Nairobi: `5/5`.
+- Previous city Berlin: `5/5`.
+- First city Lagos: `3/5`.
+- Color and shellfish controls: `5/5` each.
+- Judge audit: `0` of `50` split.
+
+The scenario did its job. It found two gaps, and they are not the same gap.
+
+Gap A, ordering. Run 2 failed Lagos with the chain fully resolved. Both the Lagos and Berlin traces were superseded, and both rendered in the Past section. But the Past section is a flat list, sorted by activation. "Previously: Berlin" and "Previously: Lagos" carry no order. Asked for the first city, the agent could not tell which past city came first, and said it did not know. The activation sort floats the most recent past to the top, which is why "right before current" passes `5/5`. That is an implicit order. There is no explicit one, so "first ever" is an inference the agent makes only some of the time.
+
+Gap B, chain resolution. Run 5 failed Lagos for a different reason. The two-step correction did not resolve. The Lagos trace ended up active, not superseded. The brief carried "User's shipping address is Lagos" and "User's current shipping address is Nairobi" as current facts at the same time. Lagos never reached the Past section. The likely cause is the contradiction compare limit. `classify()` checks each new trace against the top three active traces by activation. The salience judge mints several near-duplicate shipping traces. When the Nairobi correction arrived, a Lagos trace sat outside the compare window and was never superseded. The mechanism is worth confirming. The outcome is certain: a stale fact stayed marked current.
+
+Read. Gap A is a rendering problem. The data is right and the order is missing. Gap B is a correctness problem. The data is wrong and a stale fact reads as current. Gap B comes first. Nairobi passed `5/5`, but in run 5 it passed despite a contradictory brief, because the corrections line is emphatic. Current truth is not solved yet. In run 5 it survived a broken memory state.
+
+Fix directions:
+- Gap A: render the Past section as an ordered lineage. Walk the supersede pointers, render oldest to newest, label the first city and the current one. Then "first city" and "before current" are both explicit.
+- Gap B: a correction should supersede every active trace on the same topic, not only the top three by activation. Dedupe near-identical traces before the contradiction pass. The compare limit of three was a cost choice. It is now a correctness bug.
+
+Also fixed: the variance summary title was hardcoded to `retail_memory_week`. It now reads the scenario name from the run.
+
+Result, pending: fix Gap B, then Gap A, then rerun `relocation_chain` as v7.
+
+---
+
+## May 25, 2026. Fixing the two relocation-chain gaps.
+
+Both gaps from the v6 entry are now fixed in code.
+
+Gap B, chain resolution. The bug was in `_integrate_trace`. When a new trace arrived, it compared the trace against the top three active traces ranked by activation, and it superseded only the first contradicting trace it found, then returned.
+
+Two faults in one function. A stale fact has low activation, so ranking by activation and keeping the top three drops exactly the traces a correction is meant to catch. And returning after the first correction leaves any other stale trace untouched. A two-step chain, Lagos to Berlin to Nairobi, needs the Nairobi correction to supersede every stale shipping trace at once.
+
+The fix. `_integrate_trace` now compares the new trace against every active trace, and supersedes every one it corrects. The activation-ranked cap is removed. `CONTRADICTION_COMPARE_LIMIT` is gone from the config.
+
+A cost note, because the cap was a cost guard. Comparing against every active trace also makes CONFIRM dedup reliable. A duplicate now always meets the trace it duplicates and gets dropped instead of stored. Fewer duplicates means a smaller active set, which means the all-traces scan stays cheap. The cap was suppressing dedup, which grew the active set, which is the cost it was meant to control. At real scale the right scoping is embedding similarity by topic, not an activation rank.
+
+Gap A, ordered lineage. The Past section rendered superseded traces ranked by activation, so the order was implicit and recency-shaped. The fix renders them oldest first, sorted by `created_at`. The agent prompt now states the section is ordered oldest first, the first item earliest, the last item the most recent past. "First city" is the first entry. "City before current" is the last entry. Both are explicit.
+
+Verification, offline. The 16 unit tests still pass. Three direct checks: one correction superseded both stale traces in a two-step chain, a duplicate trace was dropped and the original got a reference bump, and the Past section rendered Lagos before Berlin by creation time.
+
+Result, pending: rerun `relocation_chain` as v7. Lagos should climb from `3/5`. Berlin and Nairobi should hold at `5/5`. The run-5 failure, a stale fact left active, should not recur.
+
+
+---
+
+## May 25, 2026. v8 patch: user-sourced salience and explicit past labels.
+
+v7 exposed two failures that the v6 summary had hidden.
+
+First, the salience judge was treating the agent answer as a source of user facts. The relocation scenario never has the user mention Lagos after day 1. When late Lagos traces appeared, they came from the agent recalling Lagos and the judge promoting that recalled answer as if the user had asserted it again. This is memory poisoning by the agent's own output.
+
+Fix: the salience prompt now has a source rule. Durable facts may be extracted only from the user turn. The agent turn is context for judging intent, not a source of new facts about the user.
+
+Second, the Past section still asked the agent to infer order from a flat list. Oldest-first helped the first-city question but hurt the right-before-current question. The list had one reliable slot, and moving the order traded one failure for another.
+
+Fix: the Past section now labels the chain explicitly:
+- `Earliest past: ...`
+- `Past step N: ...`
+- `Most recent past before current: ...`
+
+The working-memory prompt now tells the agent how to use those labels: earliest for first-ever questions, most recent past for right-before-current questions.
+
+Offline verification: 19 tests pass. Added a brief-render test that confirms a Lagos to Berlin to Nairobi chain renders Lagos as `Earliest past`, Berlin as `Most recent past before current`, and Nairobi as active current memory.
+
+Prediction for v8: Nairobi should hold at 5/5. Berlin should recover from v7's 1/5. Lagos should stay high if the judge stops re-promoting agent-recalled history as new user truth.
+
+---
+
+## May 25, 2026. v8 result: source control fixed most of the chain, one lineage leak remains.
+
+Ran `v8_user_sourced_lineage` on the relocation-chain scenario after two patches:
+- the salience judge now extracts durable facts only from the user turn, not the agent turn.
+- the Past section now labels lineage explicitly: earliest past, middle steps, most recent past before current.
+
+Result across five runs:
+- Sliding window: `0.00` mean.
+- Recall Lab: `0.96` mean.
+- Current city Nairobi: `5/5`.
+- Right-before-current city Berlin: `4/5`.
+- First city Lagos: `5/5`.
+- Favorite color green: `5/5`.
+- Daughter shellfish restriction: `5/5`.
+
+Judge audit: one split out of 50, on a sliding-window failure. It did not affect Recall Lab scoring.
+
+The patches worked. Compared with v7, Recall Lab moved from `0.80` mean to `0.96`, Lagos recovered from `4/5` to `5/5`, and Berlin recovered from `1/5` to `4/5`.
+
+One failure remains. Run 1 still put a Lagos trace after Berlin in the Past section:
+- Earliest past: Lagos
+- Past step 2: Berlin
+- Most recent past before current: Lagos
+
+The agent then answered the right-before-current question with Lagos. The data was wrong, and the answer followed the data. This is no longer a prompt-order problem. It is a lineage construction problem: a stale Lagos trace can still enter the chain after Berlin, even with user-only salience. The next fix is not more prompt wording. The trace store needs topic-level lineage, so one shipping-address chain cannot accept an older city after a newer city unless the user explicitly reverts.
+
+Read: v8 validates the source-control patch and explicit labels, but multi-step memory now needs lineage constraints. The chain is close, not solved.
+
+---
+
+## May 25, 2026. The run-1 leak was the soft patch, not a lineage gap.
+
+A closer read of the v8 run-1 trace revised the entry above.
+
+The v8 source-control patch was a prompt instruction. The judge saw the user turn and the agent turn, and was told to extract facts from the user turn only. The judge followed that most of the time. v8 at `0.96` is the proof. Run 1 is the proof it is not airtight.
+
+Run 1's late Lagos trace carries `supersedes = 7`, the Berlin trace, so it was minted after Berlin and superseded it. The `relocation_chain` scenario never has the user mention Lagos after day 1. So the Lagos content came from an agent turn, and the judge extracted it despite the instruction. A prompt instruction is a request the model can decline.
+
+That reframes the next fix. The lineage-constraint idea from the v8 entry is sound, but it is not the fix to reach for. A lineage constraint only does work when a bad trace is created. With airtight source control every trace is user-asserted, so every change to the chain is a real user statement, and the constraint never fires. A constraint also needs to tell a real revert from a phantom, which is the same user-versus-agent question source control already answers. Source control is the foundation.
+
+The fix. The judge no longer sees the agent turn at all. `JUDGE_PROMPT` shows only the user turn, and `score_exchange` passes only `exchange.user`. The judge cannot extract a fact it cannot see. The soft rule is now structural.
+
+The cost is small. The judge loses the agent turn as scoring context. Durable user facts, preferences, allergies, addresses, are self-contained in the user turn. A pure confirmation like "yes please" scores low and is skipped anyway.
+
+Verified offline: judge.py compiles, the agent placeholder is gone from the prompt, `format(user=...)` works without a missing key, and the 19 tests pass.
+
+Result, pending: rerun `relocation_chain` as v9. The run-1 leak should not recur. Berlin should reach `5/5`. If a clean run still corrupts the chain through a different path, a user turn the judge mis-reads for example, that is when the lineage constraint earns its place.
+
+---
+
+## May 26, 2026. v9 result: user-only salience closes the relocation chain.
+
+Ran the relocation-chain variance campaign after making the salience judge structurally user-only.
+
+Command:
+
+```bash
+python -m recall_lab.eval.variance --scenario scenarios/relocation_chain.json --label v9_user_only_judge
+```
+
+Result across five runs:
+- Sliding window: `0.00` mean, every run.
+- Recall Lab: `1.00` mean, every run.
+- Current city Nairobi: `5/5`.
+- Right-before-current city Berlin: `5/5`.
+- First city Lagos: `5/5`.
+- Favorite color green: `5/5`.
+- Daughter shellfish restriction: `5/5`.
+- Judge audit: `0` split verdicts out of `50` graded answers.
+
+The run-1 leak from v8 did not recur. The judge cannot promote agent-generated history if the agent turn is not in its prompt.
+
+Trace read: the chain is clean. Lagos is superseded. Berlin is superseded. Nairobi remains active. The Past section renders a two-entry lineage: earliest past Lagos, most recent past before current Berlin. The agent uses those labels correctly.
+
+Read. The structural source boundary fixed the memory-poisoning bug. The system no longer turns its own recalled answer into fresh user memory.
+
+This also changes the lineage-constraint question. A topic-level lineage constraint is still a plausible future backstop, but v9 shows it is not needed for the failure observed in v8. The root problem was source leakage, not lineage policy.
+
+Current public claim, scoped tightly:
+
+On two synthetic multi-day scenarios, a brief-backed memory system with validity state, a Past section, and user-only salience beats a two-turn sliding-window baseline. This is a mechanism result, not a benchmark.
+
+What remains before stronger claims:
+- vector retrieval control
+- long-context control
+- larger scenario set
+- equal-token-budget baseline
+- human-curated and random-curated brief controls
+- decay policy
+
+The next build should not make the current scenario easier. Both retail v5 and relocation v9 are maxed at `1.00`. The next useful experiment needs a harder scenario or a new control.
+
+---
+
+## May 26, 2026. Documentation sync after v9.
+
+Updated `README.md` to match the actual system state.
+
+The README now records:
+- user-only salience judge
+- `Past, no longer current` brief section
+- explicit past-lineage labels
+- retail v5 result
+- relocation-chain v9 result
+- judge audit status
+- current incomplete controls
+- the scoped public claim
+
+This matters because the repo had drifted. It still said the full four-day retail trial and sliding-window comparison were incomplete, even though both the retail and relocation-chain campaigns had completed. The README now tells the same story as the code and the research log.

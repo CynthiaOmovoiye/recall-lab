@@ -1,8 +1,9 @@
 """Variance runner: run the retail trial several times and report the spread.
 
-A single trial is one draw. The salience judge, contradiction classifier, and
-agent calls are live model calls, so what gets promoted into the brief can
-change between runs. One run is not a stable result.
+A single trial is one draw. The agents answer above temperature zero, so the
+exact wording, and what the sleep job promotes from it, changes between runs.
+The salience judge and the contradiction classifier run at temperature zero.
+One run is not a stable result.
 
 This runner runs the full four-day both-agents trial N times, keeps every run
 under reports/variance/<label>/run_K, then writes a summary with the per-run
@@ -83,12 +84,13 @@ def write_summary(payloads: list[dict[str, Any]], path: Path) -> None:
         for agent in payload["agents"]:
             by_agent.setdefault(agent["agent_name"], []).append(agent)
 
+    scenario_name = payloads[0].get("scenario_name") or "unknown_scenario"
     lines = [
-        "# Recall Lab variance, retail_memory_week",
+        f"# Recall Lab variance, {scenario_name}",
         "",
-        f"{len(payloads)} runs of the four-day both-agents trial.",
-        "Same scenario, same code. The spread comes from live model calls in "
-        "the agent, salience judge, and contradiction classifier.",
+        f"{len(payloads)} runs of the both-agents trial.",
+        "Same scenario, same code. The spread comes from the agents answering "
+        "above temperature zero. The judge and classifier run at temperature zero.",
         "",
         "## Recall accuracy per run",
         "",
@@ -169,7 +171,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scenario", type=Path, default=DEFAULT_SCENARIO)
     parser.add_argument(
         "--label",
-        default="v3_ensemble_judge",
+        default="v5_past_section",
         help="Campaign name. Output goes to reports/variance/<label>/.",
     )
     return parser.parse_args()
