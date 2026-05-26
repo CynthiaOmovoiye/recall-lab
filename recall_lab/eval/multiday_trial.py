@@ -16,16 +16,17 @@ import argparse
 import json
 import shutil
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
 from recall_lab.agent import RecallAgent
 from recall_lab.consolidation.sleep import run_sleep_job
 from recall_lab.controls.sliding import SlidingWindowAgent
-from recall_lab.eval.metrics import FailureMode, classify_failure_mode, estimate_tokens
+from recall_lab.eval.metrics import FailureMode, estimate_tokens, judge_answer
 from recall_lab.memory.brief import Brief
 from recall_lab.memory.episodic import EpisodicLog
+from recall_lab.memory.traces import MemoryTraceStore
 
 DEFAULT_SCENARIO = Path("scenarios/retail_memory_week.json")
 DEFAULT_OUT_DIR = Path("reports/retail_memory_week")
@@ -45,6 +46,7 @@ class AnswerRecord:
     failure_mode: str | None = None
     correct: bool | None = None
     output_tokens_estimate: int = 0
+    judge_votes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -55,6 +57,7 @@ class AgentTrialResult:
     records: list[AnswerRecord] = field(default_factory=list)
     sleep_summaries: list[dict[str, Any]] = field(default_factory=list)
     brief_text: str | None = None
+    memory_traces: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def eval_records(self) -> list[AnswerRecord]:
@@ -95,13 +98,46 @@ def make_output_dir(base_dir: Path, clean: bool) -> Path:
     return base_dir
 
 
-def score_answer(response: str, expected: str) -> tuple[bool, FailureMode]:
-    """Score one final-eval answer."""
-    mode = classify_failure_mode(response, expected)
-    return mode == FailureMode.CORRECT, mode
+def parse_time(value: str | None, fallback: datetime) -> datetime:
+    """Parse an ISO timestamp from a scenario file."""
+    if not value:
+        return fallback
+    return datetime.fromisoformat(value)
 
 
-def run_sliding_trial(scenario: dict[str, Any], days: list[dict[str, Any]]) -> AgentTrialResult:
+class TrialClock:
+    """Mutable clock used to give simulated days real timestamps."""
+
+    def __init__(self) -> None:
+        self.current = datetime.now(UTC)
+
+    def set(self, value: datetime) -> None:
+        self.current = value
+
+    def __call__(self) -> datetime:
+        return self.current
+
+
+def score_answer(
+    question: str, response: str, expected: str, judge_samples: int
+) -> tuple[bool, FailureMode, list[str]]:
+    """Score one final-eval answer with the LLM judge.
+
+    Returns whether it is correct, the failure mode, and the raw judge votes.
+    With judge_samples above one the votes show whether the judge agreed with
+    itself. That is the audit behind the single-call default.
+    """
+    result = judge_answer(question, response, expected, samples=judge_samples)
+    votes = [vote.value for vote in result.votes]
+    return result.mode == FailureMode.CORRECT, result.mode, votes
+
+
+def run_sliding_trial(
+    scenario: dict[str, Any],
+    days: list[dict[str, Any]],
+    judge_samples: int = 1,
+    verbose: bool = False,
+) -> AgentTrialResult:
     """Run the full scenario through the sliding-window baseline."""
     window = int(scenario.get("working_window", 2))
     agent = SlidingWindowAgent(window=window)
@@ -109,7 +145,10 @@ def run_sliding_trial(scenario: dict[str, Any], days: list[dict[str, Any]]) -> A
 
     for day in days:
         label = day.get("label", "day")
-        for i, user_turn in enumerate(day.get("turns", []), start=1):
+        turns = day.get("turns", [])
+        for i, user_turn in enumerate(turns, start=1):
+            if verbose:
+                print(f"[sliding] {label}: turn {i}/{len(turns)}")
             response = agent.respond(user_turn)
             result.records.append(
                 AnswerRecord(
@@ -124,11 +163,14 @@ def run_sliding_trial(scenario: dict[str, Any], days: list[dict[str, Any]]) -> A
 
     final_eval = scenario.get("final_eval", {})
     eval_label = final_eval.get("label", "final_eval")
-    for i, item in enumerate(final_eval.get("questions", []), start=1):
+    questions = final_eval.get("questions", [])
+    for i, item in enumerate(questions, start=1):
         question = item["text"]
         expected = item["expected"]
+        if verbose:
+            print(f"[sliding] {eval_label}: question {i}/{len(questions)}")
         response = agent.respond(question)
-        correct, mode = score_answer(response, expected)
+        correct, mode, votes = score_answer(question, response, expected, judge_samples)
         result.records.append(
             AnswerRecord(
                 phase="final_eval",
@@ -139,6 +181,7 @@ def run_sliding_trial(scenario: dict[str, Any], days: list[dict[str, Any]]) -> A
                 expected=expected,
                 failure_mode=mode.value,
                 correct=correct,
+                judge_votes=votes,
                 output_tokens_estimate=estimate_tokens(response),
             )
         )
@@ -150,6 +193,8 @@ def run_recall_trial(
     scenario: dict[str, Any],
     days: list[dict[str, Any]],
     out_dir: Path,
+    judge_samples: int = 1,
+    verbose: bool = False,
 ) -> AgentTrialResult:
     """Run the full scenario through the brief-backed Recall agent."""
     window = int(scenario.get("working_window", 2))
@@ -159,14 +204,21 @@ def run_recall_trial(
     agent_dir.mkdir(parents=True, exist_ok=True)
     log = EpisodicLog(db_path=agent_dir / "log.db")
     brief = Brief(path=agent_dir / "brief.md")
+    trace_store = MemoryTraceStore(path=agent_dir / "memory_traces.jsonl")
     brief.load()
     brief.save()
-    agent = RecallAgent(brief=brief, log=log, working_window=window)
-    sleep_day = datetime.now(UTC)
+    clock = TrialClock()
+    agent = RecallAgent(brief=brief, log=log, working_window=window, clock=clock)
+    fallback_time = datetime.now(UTC)
 
-    for day in days:
+    for day_index, day in enumerate(days):
         label = day.get("label", "day")
-        for i, user_turn in enumerate(day.get("turns", []), start=1):
+        day_time = parse_time(day.get("date"), fallback_time + timedelta(days=day_index))
+        turns = day.get("turns", [])
+        for i, user_turn in enumerate(turns, start=1):
+            if verbose:
+                print(f"[recall] {label}: turn {i}/{len(turns)}")
+            clock.set(day_time + timedelta(minutes=i))
             response = agent.respond(user_turn)
             result.records.append(
                 AnswerRecord(
@@ -180,17 +232,27 @@ def run_recall_trial(
             )
 
         if day.get("sleep_after", True):
-            summary = run_sleep_job(sleep_day, brief, log)
+            if verbose:
+                print(f"[recall] {label}: sleep job")
+            sleep_time = day_time.replace(hour=23, minute=0, second=0, microsecond=0)
+            summary = run_sleep_job(sleep_time, brief, log, trace_store=trace_store)
             summary["day_label"] = label
             result.sleep_summaries.append(summary)
+            if verbose:
+                print(f"[recall] {label}: sleep summary {summary}")
 
     final_eval = scenario.get("final_eval", {})
     eval_label = final_eval.get("label", "final_eval")
-    for i, item in enumerate(final_eval.get("questions", []), start=1):
+    eval_time = parse_time(final_eval.get("date"), fallback_time + timedelta(days=len(days)))
+    questions = final_eval.get("questions", [])
+    for i, item in enumerate(questions, start=1):
         question = item["text"]
         expected = item["expected"]
+        if verbose:
+            print(f"[recall] {eval_label}: question {i}/{len(questions)}")
+        clock.set(eval_time + timedelta(minutes=i))
         response = agent.respond(question)
-        correct, mode = score_answer(response, expected)
+        correct, mode, votes = score_answer(question, response, expected, judge_samples)
         result.records.append(
             AnswerRecord(
                 phase="final_eval",
@@ -201,11 +263,13 @@ def run_recall_trial(
                 expected=expected,
                 failure_mode=mode.value,
                 correct=correct,
+                judge_votes=votes,
                 output_tokens_estimate=estimate_tokens(response),
             )
         )
 
     result.brief_text = brief.path.read_text(encoding="utf-8")
+    result.memory_traces = trace_store.to_dicts()
     return result
 
 
@@ -230,6 +294,7 @@ def result_payload(
                 "final_eval": [asdict(record) for record in result.eval_records],
                 "sleep_summaries": result.sleep_summaries,
                 "brief_text": result.brief_text,
+                "memory_traces": result.memory_traces,
             }
             for result in results
         ],
@@ -267,17 +332,31 @@ def write_markdown_report(payload: dict[str, Any], path: Path) -> None:
         lines.extend([f"### {agent['agent_name']}", ""])
         for record in agent["final_eval"]:
             status = "PASS" if record["correct"] else "FAIL"
-            lines.extend(
-                [
-                    f"- {status}: {record['user']}",
-                    f"  - expected: {record['expected']}",
-                    f"  - mode: {record['failure_mode']}",
-                    f"  - answer: {record['agent']}",
-                ]
-            )
+            entry = [
+                f"- {status}: {record['user']}",
+                f"  - expected: {record['expected']}",
+                f"  - mode: {record['failure_mode']}",
+            ]
+            votes = record.get("judge_votes") or []
+            if len(votes) > 1:
+                agree = "unanimous" if len(set(votes)) == 1 else "split"
+                entry.append(f"  - judge votes ({agree}): {', '.join(votes)}")
+            entry.append(f"  - answer: {record['agent']}")
+            lines.extend(entry)
         lines.append("")
 
     for agent in payload["agents"]:
+        if agent.get("memory_traces"):
+            lines.extend(["## Final memory traces", ""])
+            lines.append("| Status | Section | Memory | Supersedes | References |")
+            lines.append("|---|---|---|---:|---:|")
+            for trace in agent["memory_traces"]:
+                lines.append(
+                    f"| {trace['status']} | {trace['section']} | {trace['compression']} | "
+                    f"{trace.get('supersedes') or ''} | {len(trace.get('references', []))} |"
+                )
+            lines.append("")
+
         if agent.get("brief_text"):
             lines.extend(
                 ["## Final Recall Lab brief", "", "```markdown", agent["brief_text"], "```"]
@@ -292,6 +371,8 @@ def run_trial(
     agents: AgentChoice = "both",
     max_days: int | None = None,
     clean: bool = True,
+    judge_samples: int = 1,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     """Run a configurable trial and write JSON plus markdown outputs."""
     scenario = load_scenario(scenario_path)
@@ -300,9 +381,15 @@ def run_trial(
 
     results: list[AgentTrialResult] = []
     if agents in {"sliding", "both"}:
-        results.append(run_sliding_trial(scenario, days))
+        results.append(
+            run_sliding_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
+        )
     if agents in {"recall", "both"}:
-        results.append(run_recall_trial(scenario, days, out_dir))
+        results.append(
+            run_recall_trial(
+                scenario, days, out_dir, judge_samples=judge_samples, verbose=verbose
+            )
+        )
 
     payload = result_payload(scenario, days, results)
     (out_dir / "trial_result.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -316,6 +403,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--agents", choices=["sliding", "recall", "both"], default="both")
     parser.add_argument("--max-days", type=int, default=None)
+    parser.add_argument(
+        "--judge-samples",
+        type=int,
+        default=1,
+        help="Judge calls per answer. 1 ships. Use 3 to audit judge disagreement.",
+    )
+    parser.add_argument("--verbose", action="store_true", help="Print progress while running.")
     parser.add_argument(
         "--no-clean",
         action="store_true",
@@ -332,6 +426,8 @@ def main() -> None:
         agents=args.agents,
         max_days=args.max_days,
         clean=not args.no_clean,
+        judge_samples=args.judge_samples,
+        verbose=args.verbose,
     )
 
     print(f"trial: {payload['scenario_name']}")
