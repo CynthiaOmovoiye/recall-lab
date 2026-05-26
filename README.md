@@ -232,7 +232,7 @@ The current honest claim is narrow:
 
 > On two synthetic multi-day memory scenarios, Recall Lab's brief-backed memory with validity state and user-only salience outperformed a two-turn sliding-window baseline. The result shows a mechanism, not a benchmark.
 
-Do not claim general superiority yet. The repo still needs vector retrieval, long-context, more scenarios, and a larger protocol.
+This is not a general memory benchmark yet. The next controls are vector retrieval, long-context runs, more scenarios, and a larger protocol.
 
 ## Prior art note
 
