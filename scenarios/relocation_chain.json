@@ -1,0 +1,94 @@
+{
+  "name": "relocation_chain",
+  "description": "A four-day trial with a two-step relocation: Lagos to Berlin to Nairobi. Tests whether the consolidated brief preserves the order of superseded facts, so the agent can answer the current city, the city right before it, and the first city. The retail trial only had one correction. This one probes the chain.",
+  "working_window": 2,
+  "customer_name": "Dele",
+  "agent_role": "personal shopping assistant",
+  "days": [
+    {
+      "label": "May 24 night",
+      "sleep_after": true,
+      "turns": [
+        "Hi, I'm Dele. Be my personal shopping assistant this week.",
+        "My favorite color is green.",
+        "My daughter is allergic to shellfish, so avoid shellfish in any food suggestions.",
+        "Ship my orders to Lagos.",
+        "I'm looking for a gift for my brother.",
+        "Thanks, I'll be back tomorrow."
+      ],
+      "date": "2026-05-24T23:00:00+00:00"
+    },
+    {
+      "label": "May 25",
+      "sleep_after": true,
+      "turns": [
+        "Quick update. I have moved to Berlin. Ship to Berlin from now on.",
+        "Can you suggest a gift in my favorite color?",
+        "Would a seafood snack box be safe for my daughter?",
+        "Where will you ship my order if I buy today?",
+        "I also enjoy jazz records.",
+        "A green scarf might suit my brother.",
+        "That helps, thank you."
+      ],
+      "date": "2026-05-25T11:00:00+00:00"
+    },
+    {
+      "label": "May 26",
+      "sleep_after": true,
+      "turns": [
+        "Another change. I have relocated again, this time to Nairobi. Use Nairobi for shipping now.",
+        "Please drop the old Berlin address.",
+        "What city should you ship to today?",
+        "Compare a green tote bag and a green notebook.",
+        "Which one feels more like a gift?",
+        "Keep the recommendation short.",
+        "I might buy headphones next month."
+      ],
+      "date": "2026-05-26T11:00:00+00:00"
+    },
+    {
+      "label": "May 27",
+      "sleep_after": true,
+      "turns": [
+        "Remind me what color I usually choose.",
+        "Do not suggest shellfish snacks again.",
+        "My brother prefers practical gifts.",
+        "What city should you ship to right now?",
+        "Make the answer brief.",
+        "Thanks, I'll decide in the morning."
+      ],
+      "date": "2026-05-27T11:00:00+00:00"
+    }
+  ],
+  "final_eval": {
+    "label": "May 28 morning",
+    "questions": [
+      {
+        "text": "Where should you ship my order now?",
+        "expected": "Nairobi",
+        "notes": "Current truth at the end of a two-step correction chain."
+      },
+      {
+        "text": "Which city did I ship to right before my current one?",
+        "expected": "Berlin",
+        "notes": "Middle state. Tests whether the past section preserves order."
+      },
+      {
+        "text": "What was the very first city I shipped to?",
+        "expected": "Lagos",
+        "notes": "Oldest state. Tests recall of the start of the chain."
+      },
+      {
+        "text": "What is my favorite color?",
+        "expected": "green",
+        "notes": "Stable preference, control."
+      },
+      {
+        "text": "What food restriction should you remember for my daughter?",
+        "expected": "shellfish",
+        "notes": "Safety-sensitive memory, control."
+      }
+    ],
+    "date": "2026-05-28T08:00:00+00:00"
+  }
+}

@@ -48,19 +48,45 @@ class MemoryTraceStore:
         return current_traces(self.load())
 
     def render_brief(self, brief: Brief, now: datetime) -> None:
-        """Render active traces into the human-readable brief."""
+        """Render the trace store into the human-readable brief.
+
+        Active traces become current facts under their own sections. Superseded
+        traces become history under the past section, each line marked so the
+        agent does not read it as current truth. Archived traces are dropped.
+        """
+        all_traces = self.load()
         sections: dict[str, list[str]] = {}
+
         active = sorted(
-            self.active(),
+            current_traces(all_traces),
             key=lambda trace: activation(trace, now),
             reverse=True,
         )
-
         for trace in active:
             section = SECTION_ALIASES.get(trace.section, trace.section)
             sections.setdefault(section, [])
             if trace.compression not in sections[section]:
                 sections[section].append(trace.compression)
+
+        superseded = sorted(
+            (t for t in all_traces if t.status == MemoryStatus.SUPERSEDED.value),
+            key=lambda trace: trace.created_at,
+        )
+        past_section = SECTION_ALIASES["past"]
+        total_past = len(superseded)
+        for index, trace in enumerate(superseded, start=1):
+            if total_past == 1:
+                label = "Past"
+            elif index == 1:
+                label = "Earliest past"
+            elif index == total_past:
+                label = "Most recent past before current"
+            else:
+                label = f"Past step {index}"
+            line = f"{label}: {trace.compression}"
+            sections.setdefault(past_section, [])
+            if line not in sections[past_section]:
+                sections[past_section].append(line)
 
         brief.sections = sections
         brief.save()
