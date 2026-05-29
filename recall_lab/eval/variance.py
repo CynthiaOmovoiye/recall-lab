@@ -32,6 +32,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+from recall_lab.eval.equal_budget_trial import run_equal_budget_trial
 from recall_lab.eval.multiday_trial import DEFAULT_SCENARIO, run_trial
 
 VARIANCE_DIR = Path("reports/variance")
@@ -133,25 +134,46 @@ def write_summary(payloads: list[dict[str, Any]], path: Path) -> None:
 
 
 def run_variance(
-    runs: int, scenario_path: Path, label: str
+    runs: int,
+    scenario_path: Path,
+    label: str,
+    mode: str = "multiday",
+    agents: str = "both",
+    budget_scale: float = 1.0,
 ) -> tuple[list[dict[str, Any]], Path]:
-    """Run the trial `runs` times under reports/variance/<label>/run_K."""
+    """Run the trial `runs` times under reports/variance/<label>/run_K.
+
+    Two modes share the same summary machinery, because both produce a payload
+    with an `agents` list carrying `recall_accuracy` and `final_eval`:
+    - multiday: the standard trial. `agents` selects the lineup (e.g. "all"
+      adds the vector-retrieval control).
+    - equal-budget: the budget-matched recency control vs Recall Lab.
+    """
     base = VARIANCE_DIR / label
     base.mkdir(parents=True, exist_ok=True)
     payloads: list[dict[str, Any]] = []
 
     for n in range(1, runs + 1):
         out_dir = base / f"run_{n}"
-        print(f"\n=== variance run {n}/{runs} -> {out_dir} ===", flush=True)
+        print(f"\n=== variance run {n}/{runs} ({mode}) -> {out_dir} ===", flush=True)
         try:
-            payload = run_trial(
-                scenario_path=scenario_path,
-                out_dir=out_dir,
-                agents="both",
-                clean=True,
-                judge_samples=3,
-                verbose=True,
-            )
+            if mode == "equal-budget":
+                payload = run_equal_budget_trial(
+                    scenario_path=scenario_path,
+                    out_dir=out_dir,
+                    budget_scale=budget_scale,
+                    judge_samples=3,
+                    verbose=True,
+                )
+            else:
+                payload = run_trial(
+                    scenario_path=scenario_path,
+                    out_dir=out_dir,
+                    agents=agents,
+                    clean=True,
+                    judge_samples=3,
+                    verbose=True,
+                )
             payloads.append(payload)
             for agent in payload["agents"]:
                 print(
@@ -174,12 +196,39 @@ def parse_args() -> argparse.Namespace:
         default="v5_past_section",
         help="Campaign name. Output goes to reports/variance/<label>/.",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["multiday", "equal-budget"],
+        default="multiday",
+        help="'multiday' runs the standard trial; 'equal-budget' runs the "
+        "budget-matched recency control vs Recall Lab.",
+    )
+    parser.add_argument(
+        "--agents",
+        choices=["sliding", "recall", "vector", "both", "all"],
+        default="both",
+        help="Multiday lineup. 'all' adds the vector-retrieval control. "
+        "Ignored in equal-budget mode.",
+    )
+    parser.add_argument(
+        "--budget-scale",
+        type=float,
+        default=1.0,
+        help="Equal-budget multiplier on Recall Lab's mean input tokens.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    payloads, base = run_variance(args.runs, args.scenario, args.label)
+    payloads, base = run_variance(
+        args.runs,
+        args.scenario,
+        args.label,
+        mode=args.mode,
+        agents=args.agents,
+        budget_scale=args.budget_scale,
+    )
 
     if not payloads:
         print("\nno runs completed, nothing to summarize")
