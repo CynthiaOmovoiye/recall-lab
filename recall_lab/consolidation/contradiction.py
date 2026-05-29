@@ -33,16 +33,14 @@ from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 
-from openai import OpenAI
-
 from recall_lab.config import (
     CONTRADICTION_MODEL,
     DATA_DIR,
     MAX_OUTPUT_TOKENS,
     OPENROUTER_API_KEY,
-    OPENROUTER_BASE_URL,
 )
 from recall_lab.consolidation.activation import MemoryTrace
+from recall_lab.llm import chat_client, complete
 
 
 # The audit trail. One JSON line per validity change.
@@ -149,8 +147,9 @@ def classify(old: str, new: str, model: str = CONTRADICTION_MODEL) -> ConflictVe
         A ConflictVerdict with a label and a one-line reason.
     """
     prompt = CLASSIFY_PROMPT.format(old=old, new=new)
-    client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=OPENROUTER_API_KEY)
-    completion = client.chat.completions.create(
+    client = chat_client()
+    completion = complete(
+        client,
         model=model,
         messages=[
             {

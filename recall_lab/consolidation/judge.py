@@ -20,9 +20,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from openai import OpenAI
-
-from recall_lab.config import JUDGE_MODEL, MAX_OUTPUT_TOKENS, OPENROUTER_API_KEY, OPENROUTER_BASE_URL
+from recall_lab.config import JUDGE_MODEL, MAX_OUTPUT_TOKENS, OPENROUTER_API_KEY
+from recall_lab.llm import chat_client, complete
 from recall_lab.memory.episodic import Exchange
 
 
@@ -129,13 +128,11 @@ def score_exchange(exchange: Exchange) -> SalienceVerdict:
     if not OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is required to run the salience judge.")
 
-    client = OpenAI(
-        base_url=OPENROUTER_BASE_URL,
-        api_key=OPENROUTER_API_KEY,
-    )
+    client = chat_client()
 
     prompt = JUDGE_PROMPT.format(user=exchange.user)
-    completion = client.chat.completions.create(
+    completion = complete(
+        client,
         model=JUDGE_MODEL,
         messages=[
             {
