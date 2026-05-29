@@ -52,6 +52,8 @@ Every sleep pass:
 
 The brief is what the agent reads. The trace store is what the sleep job reasons over.
 
+Rendered diagrams of the pipeline, memory layers, validity state machine, source boundary, and v10 results are in [`diagrams/`](diagrams/README.md).
+
 ## Memory states
 
 ```text
