@@ -727,3 +727,111 @@ The README now records:
 - the scoped public claim
 
 This matters because the repo had drifted. It still said the full four-day retail trial and sliding-window comparison were incomplete, even though both the retail and relocation-chain campaigns had completed. The README now tells the same story as the code and the research log.
+
+---
+
+## May 29, 2026. Vector-retrieval control and equal-token-budget runner.
+
+Built the two controls the v9 entry named as the next useful work: a fair-budget baseline and a vector-retrieval baseline. Both attack the same objection. Every result so far beats a deliberately starved two-turn window, so a skeptic can say Recall Lab only wins because the baseline was fed less.
+
+What was added:
+- `controls/vector.py`: the flat vector-retrieval control. Each completed exchange is embedded into an isolated in-memory ChromaDB collection; each turn retrieves the top-k most similar exchanges and prepends them. This is the Mem0 / standard-RAG default. It has no validity state by design: a superseded fact (Lagos) and the correction that replaced it (Berlin) are both just documents, and whichever scores more similar to the question wins regardless of which is still true. That is the failure this control should expose. The embedding function and client are injectable so tests run offline without a key.
+- `controls/budgeted.py`: a sliding window bounded by an input-token budget instead of a fixed turn count. It keeps the most recent turns that fit under the budget.
+- `eval/equal_budget_trial.py`: runs the Recall agent, measures its mean input tokens per chat turn, then runs the budgeted recency baseline at that same budget (scalable with `--budget-scale`) on the same scenario. Reports accuracy at equal token budget and writes a read that states plainly whether the gap survives, ties, or reverses.
+- Input-token tracking: every agent now exposes `last_input_tokens`, and `multiday_trial` records an input-token estimate per turn. The trial report gained a mean-input-tokens column, and `--agents` gained `vector` and `all`.
+- Tests: `test_vector_control.py` pins the retrieval store (top-k, isolation, empty-store, key guard) with a deterministic offline embedding function. `test_budgeted_window.py` pins context selection (drops oldest first, never overflows the budget). All 30 tests pass; ruff clean.
+
+What this does not yet show: results. The runners are implemented and unit-tested, but no live campaign has been run. The model call path needs OPENROUTER_API_KEY, same as the other agents, so the offline tests cover plumbing only.
+
+Next step: run both live campaigns on `relocation_chain`. Two predictions to check.
+1. Vector control. It should pass the current city and stable facts, and fail or wobble on the right-before-current city, because retrieval has no way to order superseded facts. If it passes everything, the validity machinery is doing less than claimed and that needs explaining.
+2. Equal budget. The budgeted window at `1.0x`, and ideally at `1.5x`, should still lose to Recall Lab. If a larger raw-recency budget closes the gap, the selective-consolidation claim is weakened for this setup, which is the falsification the protocol asks to surface.
+
+Whatever the live runs show, write it here before touching the README claim.
+
+---
+
+## May 29, 2026. Live results: vector control and equal-token-budget runs.
+
+Ran the two new controls live on `relocation_chain`. Single runs, not variance campaigns, so read the spread caveat at the end before quoting any single number.
+
+### Vector-retrieval control, full four-day, all three agents
+
+| Agent | Accuracy | Shape |
+| --- | --- | --- |
+| sliding_window_2 | 0.00 | every answer an honest gap |
+| vector_topk_5 | 0.40 | passed the stable facts, failed the whole chain |
+| recall_lab_brief_window_2 | 1.00 | all five correct |
+
+The vector control did exactly what the May 29 build entry predicted, and the failure is sharper than expected. It passed the two un-superseded facts, green and shellfish. It failed every superseded one. Asked the current city it answered Berlin, the stale middle state. Asked the city right before the current one it answered Nairobi, the current state. It inverted the order of the relocation chain. Asked the first city it said it did not know. With no validity state, Lagos, Berlin, and Nairobi are three similar documents, and cosine similarity cannot say which is current or what order they arrived in. This is the failure the control exists to expose, and it is the clearest single illustration so far of why rank without validity is not enough. It echoes the May 20 activation finding at the retrieval layer: similarity, like activation, ranks strength, not truth.
+
+### Equal-token-budget control
+
+Recall Lab's measured cost was about 440 to 454 input tokens per turn. The budget-bounded sliding window was given that budget, then 1.5x of it.
+
+| Budget | recall_lab | budgeted recency baseline |
+| --- | --- | --- |
+| 1.0x (454 tok) | 0.60 | 0.00 |
+| 1.5x (660 tok) | 1.00 | 0.00 |
+
+The recency baseline scored 0.00 at both budgets. At 1.5x its mean usage was 398.6 tokens, under the 660 cap, so it had headroom and still failed. The reason is structural. A fixed budget of recent raw turns cannot hold a fact stated on day 1 once 25 later turns have pushed past it, no matter how the budget is spent. Recall Lab compresses that fact into a brief that persists. So the win is not prompt length. Handing recency an equal or larger budget does not close the gap; it leaves it at zero. The protocol's equal-token-budget objection is answered for this scenario.
+
+### The honest caveat
+
+These are single runs. Recall Lab scored 1.00 in the all-agents run and the 1.5x run, but 0.60 in the 1.0x run, where it dropped both chain-order questions and said the first city was Berlin. That is the same above-zero-temperature variance the variance runner exists to measure. The baseline result is robust: 0.00 is 0.00 whether the comparison point is 0.6 or 1.0. The size of Recall Lab's lead is not yet a stable number from these runs.
+
+### Next step
+
+Run both controls through `eval/variance.py` so the lead is a mean over five runs with a judge audit, the same bar the retail v5 and relocation v9 claims already meet. Only after that should the README's public claim be widened to include the vector and equal-budget controls. Until then the claim stays as scoped on May 26.
+
+---
+
+## May 29, 2026. Variance campaigns: the lead is stable across runs.
+
+Ran both new controls through `eval/variance.py` with the 3-call judge audit, the same bar v5 and v9 met. This is the answer to the single-run caveat in the entry above. First batch was lost to a transient connection blip; hardened the OpenRouter client with retries (see below) and reran.
+
+### Vector-retrieval control, v10, 4 completed runs
+
+Run 4 was dropped by a provider-side content-filter false-positive, not a code fault. See the provider-noise note below. Four runs completed.
+
+| Agent | min | max | mean |
+| --- | --- | --- | --- |
+| sliding_window_2 | 0.00 | 0.00 | 0.00 |
+| vector_topk_5 | 0.40 | 0.80 | 0.55 |
+| recall_lab_brief_window_2 | 1.00 | 1.00 | 1.00 |
+
+Per-question, across the 4 runs:
+- vector passed favorite color 4/4 and the shellfish restriction 4/4, the two facts that are never superseded.
+- vector passed current city 1/4, right-before-current city 2/4, first city 0/4. The chain is where it fails.
+- recall_lab passed all five questions 4/4.
+
+The single-run 0.40 for the vector control was the low end of a 0.40 to 0.80 spread. Even at its best run it never solved the first-city question. The pattern holds: similarity retrieval keeps stable facts and cannot order superseded ones.
+
+### Equal-token-budget control, v10, 5 completed runs
+
+| Agent | min | max | mean |
+| --- | --- | --- | --- |
+| recall_lab_brief_window_2 | 1.00 | 1.00 | 1.00 |
+| budgeted_window | 0.00 | 0.20 | 0.04 |
+
+The budget-matched recency baseline averaged 0.04. It passed one question in one run, the shellfish restriction, and nothing else. Giving recency Recall Lab's full per-turn token budget does not close the gap. The equal-budget objection is now answered with a spread, not a single draw.
+
+### The single-run dip did not recur
+
+The May 29 results entry flagged that recall_lab scored 0.60 in the 1.0x single run. Across these nine completed variance runs, four vector and five equal-budget, recall_lab scored 1.00 every time. The 0.60 was an unlucky single draw, plausibly worsened by provider-routing noise. The stable read on `relocation_chain` is: recall_lab 1.00, sliding 0.00, vector ~0.55, equal-budget recency ~0.04.
+
+### Judge audit
+
+Zero split verdicts. 0 of 60 graded answers in the vector campaign, 0 of 50 in the equal-budget campaign. The judge agreed with itself on every answer, consistent with v9. One judge call remains enough.
+
+### Client hardening
+
+The first rerun lost nine of ten runs to a transient `APIConnectionError`. Each agent built its own OpenAI client inline with the default two retries, which a multi-minute blip blows past. Added `recall_lab/llm.py` with a single `chat_client()` factory at six retries and a 60s timeout, and routed all seven call sites through it: the two new controls, sliding, the recall agent, the eval judge, the salience judge, and the contradiction classifier. The rerun saw no connection errors.
+
+### Provider-routing noise, worth fixing before bigger runs
+
+One run died on an Azure content-filter false-positive: a benign shopping-assistant prompt about cities and a shellfish allergy was flagged as a jailbreak. OpenRouter routes `openai/gpt-4o-mini` across providers non-deterministically, so the model behind a given call varies run to run. That adds variance unrelated to the memory architecture and can kill a run outright. Before scaling to the 30-conversation protocol, pin the provider, for example via OpenRouter provider preferences, so the experiment measures memory strategy and not provider lottery.
+
+### Status of the public claim
+
+These results clear the variance bar v5 and v9 met, so the README's scoped claim can now widen to name the vector and equal-budget controls. Caveats that stay attached: a single scenario, four to five runs, no statistical test yet, and the provider-routing noise above. The 30-conversation protocol in `protocol.md` is still the next real milestone.

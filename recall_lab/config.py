@@ -33,6 +33,31 @@ CONTRADICTION_MODEL = os.environ.get("RECALL_CONTRADICTION_MODEL", JUDGE_MODEL)
 # a chat turn or a small JSON verdict. Without a cap, OpenRouter pre-authorizes
 # the model's full output budget and rejects the call when credit runs low.
 MAX_OUTPUT_TOKENS = int(os.environ.get("RECALL_MAX_OUTPUT_TOKENS", "1024"))
+# Resilience for the OpenRouter client. A transient connection blip during a
+# long variance batch should be absorbed by retries, not fail a whole run.
+OPENROUTER_MAX_RETRIES = int(os.environ.get("RECALL_OPENROUTER_MAX_RETRIES", "6"))
+OPENROUTER_TIMEOUT_SECONDS = float(os.environ.get("RECALL_OPENROUTER_TIMEOUT", "60"))
+
+# Provider routing. OpenRouter routes a model across providers
+# non-deterministically. That adds variance unrelated to the memory
+# architecture, and once killed a run outright when Azure's content filter
+# false-flagged a benign prompt as a jailbreak. So routing is constrained here.
+#
+# - IGNORE drops named providers entirely. Azure is ignored by default to stop
+#   the content-filter false-positive. Ignoring a provider that does not serve
+#   a given model is a harmless no-op, so this is safe to apply to every call.
+# - ORDER pins a preferred provider order (comma-separated slugs). Leave empty
+#   by default: a global order would break calls to a model that provider does
+#   not serve (e.g. forcing "OpenAI" onto the Anthropic judge). Set it only when
+#   every model in play is served by the listed providers.
+# - ALLOW_FALLBACKS lets routing fall back past the constraints when a provider
+#   is down. Set false for strict reproducibility, accepting that a provider
+#   outage then fails the call instead of silently rerouting.
+OPENROUTER_IGNORE_PROVIDERS = os.environ.get("RECALL_OPENROUTER_IGNORE_PROVIDERS", "Azure")
+OPENROUTER_PROVIDER_ORDER = os.environ.get("RECALL_OPENROUTER_PROVIDER_ORDER", "")
+OPENROUTER_ALLOW_FALLBACKS = os.environ.get(
+    "RECALL_OPENROUTER_ALLOW_FALLBACKS", "true"
+).strip().lower() in {"1", "true", "yes"}
 
 # Memory
 WORKING_MAX_TURNS = 6  # recent turns injected alongside the brief

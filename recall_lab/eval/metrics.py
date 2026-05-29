@@ -15,9 +15,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from openai import OpenAI
-
-from recall_lab.config import JUDGE_MODEL, MAX_OUTPUT_TOKENS, OPENROUTER_API_KEY, OPENROUTER_BASE_URL
+from recall_lab.config import JUDGE_MODEL, MAX_OUTPUT_TOKENS, OPENROUTER_API_KEY
+from recall_lab.llm import chat_client, complete
 
 
 class FailureMode(str, Enum):
@@ -136,13 +135,14 @@ def _parse_scorer_json(raw: str) -> dict[str, Any]:
 
 def _judge_once(question: str, response: str, ground_truth: str) -> FailureMode:
     """Run one judge call. Falls back to the substring scorer on a parse error."""
-    client = OpenAI(base_url=OPENROUTER_BASE_URL, api_key=OPENROUTER_API_KEY)
+    client = chat_client()
     prompt = SCORER_PROMPT.format(
         question=question,
         expected=ground_truth,
         response=response,
     )
-    completion = client.chat.completions.create(
+    completion = complete(
+        client,
         model=JUDGE_MODEL,
         messages=[
             {
