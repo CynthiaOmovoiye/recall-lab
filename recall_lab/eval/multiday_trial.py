@@ -23,6 +23,7 @@ from typing import Any, Literal
 from recall_lab.agent import RecallAgent
 from recall_lab.consolidation.sleep import run_sleep_job
 from recall_lab.controls.sliding import SlidingWindowAgent
+from recall_lab.controls.vector import VectorRetrievalAgent
 from recall_lab.eval.metrics import FailureMode, estimate_tokens, judge_answer
 from recall_lab.memory.brief import Brief
 from recall_lab.memory.episodic import EpisodicLog
@@ -30,7 +31,8 @@ from recall_lab.memory.traces import MemoryTraceStore
 
 DEFAULT_SCENARIO = Path("scenarios/retail_memory_week.json")
 DEFAULT_OUT_DIR = Path("reports/retail_memory_week")
-AgentChoice = Literal["sliding", "recall", "both"]
+DEFAULT_VECTOR_TOP_K = 5
+AgentChoice = Literal["sliding", "recall", "vector", "both", "all"]
 
 
 @dataclass
@@ -46,6 +48,7 @@ class AnswerRecord:
     failure_mode: str | None = None
     correct: bool | None = None
     output_tokens_estimate: int = 0
+    input_tokens_estimate: int = 0
     judge_votes: list[str] = field(default_factory=list)
 
 
@@ -74,6 +77,22 @@ class AgentTrialResult:
     @property
     def output_tokens_estimate(self) -> int:
         return sum(record.output_tokens_estimate for record in self.records)
+
+    @property
+    def input_tokens_estimate(self) -> int:
+        return sum(record.input_tokens_estimate for record in self.records)
+
+    @property
+    def chat_records(self) -> list[AnswerRecord]:
+        return [record for record in self.records if record.phase == "chat"]
+
+    @property
+    def mean_chat_input_tokens(self) -> float:
+        """Mean input-token cost per chat turn. Drives the equal-budget control."""
+        chat = self.chat_records
+        if not chat:
+            return 0.0
+        return sum(record.input_tokens_estimate for record in chat) / len(chat)
 
 
 def load_scenario(path: Path) -> dict[str, Any]:
@@ -158,6 +177,7 @@ def run_sliding_trial(
                     user=user_turn,
                     agent=response,
                     output_tokens_estimate=estimate_tokens(response),
+                    input_tokens_estimate=agent.last_input_tokens,
                 )
             )
 
@@ -183,6 +203,71 @@ def run_sliding_trial(
                 correct=correct,
                 judge_votes=votes,
                 output_tokens_estimate=estimate_tokens(response),
+                input_tokens_estimate=agent.last_input_tokens,
+            )
+        )
+
+    return result
+
+
+def run_vector_trial(
+    scenario: dict[str, Any],
+    days: list[dict[str, Any]],
+    judge_samples: int = 1,
+    verbose: bool = False,
+    top_k: int = DEFAULT_VECTOR_TOP_K,
+) -> AgentTrialResult:
+    """Run the full scenario through the flat vector-retrieval control.
+
+    This is the standard-RAG baseline: every exchange is embedded and the
+    top-k most similar are retrieved each turn. It has no validity state, so a
+    superseded fact and its correction compete on similarity alone.
+    """
+    agent = VectorRetrievalAgent(top_k=top_k)
+    result = AgentTrialResult(agent_name=f"vector_topk_{top_k}")
+
+    for day in days:
+        label = day.get("label", "day")
+        turns = day.get("turns", [])
+        for i, user_turn in enumerate(turns, start=1):
+            if verbose:
+                print(f"[vector] {label}: turn {i}/{len(turns)}")
+            response = agent.respond(user_turn)
+            result.records.append(
+                AnswerRecord(
+                    phase="chat",
+                    day_label=label,
+                    turn_index=i,
+                    user=user_turn,
+                    agent=response,
+                    output_tokens_estimate=estimate_tokens(response),
+                    input_tokens_estimate=agent.last_input_tokens,
+                )
+            )
+
+    final_eval = scenario.get("final_eval", {})
+    eval_label = final_eval.get("label", "final_eval")
+    questions = final_eval.get("questions", [])
+    for i, item in enumerate(questions, start=1):
+        question = item["text"]
+        expected = item["expected"]
+        if verbose:
+            print(f"[vector] {eval_label}: question {i}/{len(questions)}")
+        response = agent.respond(question)
+        correct, mode, votes = score_answer(question, response, expected, judge_samples)
+        result.records.append(
+            AnswerRecord(
+                phase="final_eval",
+                day_label=eval_label,
+                turn_index=i,
+                user=question,
+                agent=response,
+                expected=expected,
+                failure_mode=mode.value,
+                correct=correct,
+                judge_votes=votes,
+                output_tokens_estimate=estimate_tokens(response),
+                input_tokens_estimate=agent.last_input_tokens,
             )
         )
 
@@ -228,6 +313,7 @@ def run_recall_trial(
                     user=user_turn,
                     agent=response,
                     output_tokens_estimate=estimate_tokens(response),
+                    input_tokens_estimate=agent.last_input_tokens,
                 )
             )
 
@@ -265,6 +351,7 @@ def run_recall_trial(
                 correct=correct,
                 judge_votes=votes,
                 output_tokens_estimate=estimate_tokens(response),
+                input_tokens_estimate=agent.last_input_tokens,
             )
         )
 
@@ -291,6 +378,8 @@ def result_payload(
                 "agent_name": result.agent_name,
                 "recall_accuracy": result.recall_accuracy,
                 "output_tokens_estimate": result.output_tokens_estimate,
+                "input_tokens_estimate": result.input_tokens_estimate,
+                "mean_chat_input_tokens": round(result.mean_chat_input_tokens, 1),
                 "final_eval": [asdict(record) for record in result.eval_records],
                 "sleep_summaries": result.sleep_summaries,
                 "brief_text": result.brief_text,
@@ -317,13 +406,14 @@ def write_markdown_report(payload: dict[str, Any], path: Path) -> None:
         "",
         "## Results",
         "",
-        "| Agent | Recall accuracy | Output token estimate |",
-        "|---|---:|---:|",
+        "| Agent | Recall accuracy | Mean input tokens/turn | Output token estimate |",
+        "|---|---:|---:|---:|",
     ]
 
     for agent in payload["agents"]:
         lines.append(
             f"| {agent['agent_name']} | {agent['recall_accuracy']:.2f} | "
+            f"{agent.get('mean_chat_input_tokens', 0)} | "
             f"{agent['output_tokens_estimate']} |"
         )
 
@@ -380,11 +470,15 @@ def run_trial(
     out_dir = make_output_dir(out_dir, clean=clean)
 
     results: list[AgentTrialResult] = []
-    if agents in {"sliding", "both"}:
+    if agents in {"sliding", "both", "all"}:
         results.append(
             run_sliding_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
         )
-    if agents in {"recall", "both"}:
+    if agents in {"vector", "all"}:
+        results.append(
+            run_vector_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
+        )
+    if agents in {"recall", "both", "all"}:
         results.append(
             run_recall_trial(
                 scenario, days, out_dir, judge_samples=judge_samples, verbose=verbose
@@ -401,7 +495,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a configurable multi-day Recall Lab trial.")
     parser.add_argument("--scenario", type=Path, default=DEFAULT_SCENARIO)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
-    parser.add_argument("--agents", choices=["sliding", "recall", "both"], default="both")
+    parser.add_argument(
+        "--agents",
+        choices=["sliding", "recall", "vector", "both", "all"],
+        default="both",
+        help="'both' is sliding+recall. 'all' adds the vector-retrieval control.",
+    )
     parser.add_argument("--max-days", type=int, default=None)
     parser.add_argument(
         "--judge-samples",
@@ -436,6 +535,7 @@ def main() -> None:
     for agent in payload["agents"]:
         print(agent["agent_name"])
         print("  recall accuracy:", agent["recall_accuracy"])
+        print("  mean input tokens/turn:", agent.get("mean_chat_input_tokens", 0))
         print("  output tokens estimate:", agent["output_tokens_estimate"])
     print()
     print(f"wrote {args.out_dir / 'trial_result.json'}")

@@ -13,15 +13,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from openai import OpenAI
-
 from recall_lab.config import (
     AGENT_MODEL,
     MAX_OUTPUT_TOKENS,
     OPENROUTER_API_KEY,
-    OPENROUTER_BASE_URL,
     WORKING_MAX_TURNS,
 )
+from recall_lab.eval.metrics import estimate_tokens
+from recall_lab.llm import chat_client, complete
 from recall_lab.memory.brief import Brief
 from recall_lab.memory.episodic import Exchange, EpisodicLog
 from recall_lab.memory.working import WorkingMemory
@@ -42,6 +41,7 @@ class RecallAgent:
         self.working_window = working_window
         self.clock = clock or (lambda: datetime.now(UTC))
         self.recent_turns: list[dict] = []
+        self.last_input_tokens = 0
 
     def respond(self, user_message: str) -> str:
         """Produce one response.
@@ -63,12 +63,11 @@ class RecallAgent:
             max_turns=self.working_window,
         )
         prompt = working.render()
+        self.last_input_tokens = estimate_tokens(prompt)
 
-        client = OpenAI(
-            base_url=OPENROUTER_BASE_URL,
-            api_key=OPENROUTER_API_KEY,
-        )
-        completion = client.chat.completions.create(
+        client = chat_client()
+        completion = complete(
+            client,
             model=AGENT_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=MAX_OUTPUT_TOKENS,
