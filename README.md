@@ -86,10 +86,11 @@ Same conversational task, different memory strategy:
 
 - naive sliding window
 - Recall Lab brief-backed agent
-- flat vector retrieval, planned
+- flat vector retrieval (ChromaDB, standard-RAG default)
+- budget-bounded sliding window for the equal-token-budget control
 - full long context, planned where possible
 
-The current baseline uses a two-turn window on purpose. It makes the mechanism visible. It is not a fair benchmark yet.
+The two-turn window makes the mechanism visible but is not a fair benchmark. The equal-token-budget control answers the obvious objection to it: a budget-bounded sliding window is given the same input-token budget Recall Lab actually spends, so the comparison stops being about prompt length. Both controls have now run on the relocation chain: the vector control plateaus around `0.55` and the budget-matched recency baseline sits near `0.04`, while Recall Lab holds `1.00`. See the status section for the per-question breakdown.
 
 ## Metrics
 
@@ -111,9 +112,11 @@ The output token count is currently an approximation from generated text length,
 - JSONL for memory traces
 - Markdown for the consolidated brief
 - pytest for pure-function checks
-- ChromaDB planned for the vector control
+- ChromaDB for the flat vector-retrieval control
 
 Deliberately small so the architecture, not the infra, is what is being measured.
+
+All model calls go through one client factory (`recall_lab/llm.py`) with shared retries, a timeout, and OpenRouter provider routing. Provider routing is constrained for reproducibility: by default Azure is excluded, because its content filter once false-flagged a benign scenario prompt as a jailbreak and killed a run. Random provider routing otherwise adds variance unrelated to the memory strategy. The routing knobs live in `config.py` (`RECALL_OPENROUTER_IGNORE_PROVIDERS`, `RECALL_OPENROUTER_PROVIDER_ORDER`, `RECALL_OPENROUTER_ALLOW_FALLBACKS`).
 
 ## Status
 
@@ -132,6 +135,10 @@ Working now:
 - `memory/brief.py` loads, renders, deduplicates, and saves the consolidated memory brief.
 - `consolidation/judge.py` scores only the user turn. The agent turn is hidden from the salience judge so the system cannot promote its own generated text as user truth.
 - `consolidation/sleep.py` routes promoted memories through salience, trace creation, contradiction checks, validity transitions, activation ranking, and brief rendering.
+- `controls/vector.py` implements the flat vector-retrieval control: each exchange is embedded in an isolated in-memory ChromaDB collection and the top-k most similar are retrieved per turn. It has no validity state, so a superseded fact and its correction compete on similarity alone. The embedding function is injectable for offline, key-free tests.
+- `controls/budgeted.py` implements a sliding window bounded by an input-token budget instead of a turn count, for the equal-token-budget comparison.
+- `eval/equal_budget_trial.py` measures Recall Lab's mean input tokens per turn, then runs the budget-matched recency baseline on the same scenario and reports accuracy at equal token budget.
+- `multiday_trial.py` now records an input-token estimate per turn and supports the vector control via `--agents vector` or `--agents all`.
 - `eval/metrics.py` uses an LLM scorer with a stricter rubric. Variance runs can audit each answer with three judge calls.
 - `eval/multiday_trial.py` runs configurable multi-day scenario files and writes JSON plus markdown reports.
 - `eval/variance.py` runs the same scenario several times and reports spread, per-question pass counts, and judge disagreement.
@@ -150,14 +157,15 @@ Observed so far:
 - Relocation-chain trial v9: sliding window `0.00`, Recall Lab `1.00` across five runs.
 - In v9, Recall Lab passed current city, previous city, first city, color, and safety restriction at `5/5` each.
 - v9 judge audit: `0` split verdicts out of `50` graded answers.
+- Vector-retrieval control v10 on the relocation chain, four runs: sliding `0.00`, vector mean `0.55` (range `0.40`–`0.80`), Recall Lab `1.00`. The vector control passed the stable facts (color and shellfish) `4/4` but failed the chain: current city `1/4`, previous city `2/4`, first city `0/4`. Similarity retrieval keeps stable facts and cannot order superseded ones.
+- Equal-token-budget control v10, five runs: Recall Lab `1.00`, budget-matched recency baseline mean `0.04`. Handing the recency baseline Recall Lab's full per-turn token budget did not close the gap.
+- v10 judge audit: `0` split verdicts out of `110` graded answers across both campaigns.
 
 Still incomplete:
 
-- vector retrieval control
 - full long-context control
 - larger eval set beyond the current two scenarios
 - brief decay policy
-- equal-token-budget baseline
 - human-curated and random-curated brief controls
 - UI or screenshot dashboard beyond markdown reports
 - statistical protocol over many conversations
@@ -190,6 +198,14 @@ python -m recall_lab.eval.multiday_trial
 # Run both agents on a named scenario
 python -m recall_lab.eval.multiday_trial --scenario scenarios/retail_memory_week.json --agents both --verbose
 python -m recall_lab.eval.multiday_trial --scenario scenarios/relocation_chain.json --agents both --verbose
+
+# Add the flat vector-retrieval control (sliding + vector + recall)
+python -m recall_lab.eval.multiday_trial --scenario scenarios/relocation_chain.json --agents all --verbose
+
+# Run the equal-token-budget control: match the recency baseline to Recall Lab's budget
+python -m recall_lab.eval.equal_budget_trial --scenario scenarios/relocation_chain.json --verbose
+# Hand the recency baseline 1.5x Recall Lab's budget and see if it still loses
+python -m recall_lab.eval.equal_budget_trial --scenario scenarios/relocation_chain.json --budget-scale 1.5 --verbose
 
 # Run a 5-run variance campaign
 python -m recall_lab.eval.variance --scenario scenarios/retail_memory_week.json --label v5_past_section
@@ -230,9 +246,11 @@ Reports go under `reports/`. Report outputs are local artifacts and should not b
 
 The current honest claim is narrow:
 
-> On two synthetic multi-day memory scenarios, Recall Lab's brief-backed memory with validity state and user-only salience outperformed a two-turn sliding-window baseline. The result shows a mechanism, not a benchmark.
+> On two synthetic multi-day memory scenarios, Recall Lab's brief-backed memory with validity state and user-only salience held `1.00` recall while three baselines did not: a two-turn sliding window (`0.00`), flat vector retrieval (mean `0.55`, which keeps stable facts but cannot order a chain of corrections), and a sliding window given Recall Lab's full per-turn token budget (mean `0.04`). The result shows a mechanism, not a benchmark.
 
-This is not a general memory benchmark yet. The next controls are vector retrieval, long-context runs, more scenarios, and a larger protocol.
+The vector control isolates the contribution of validity state: standard retrieval recalls un-superseded facts but fails the relocation chain. The equal-token-budget control shows the win is not prompt length: matching the recency baseline's budget to Recall Lab's does not close the gap.
+
+Caveats that stay attached: one relocation scenario, four to five runs per control, no statistical test yet, and a single model family. This is not a general memory benchmark. The next steps are a long-context control, more scenarios, and the pre-registered 30-conversation protocol in `protocol.md`.
 
 ## Prior art note
 
