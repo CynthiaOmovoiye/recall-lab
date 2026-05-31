@@ -26,6 +26,7 @@ from recall_lab.config import (
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
     OPENROUTER_IGNORE_PROVIDERS,
+    OPENROUTER_JUDGE_PROVIDER_ORDER,
     OPENROUTER_MAX_RETRIES,
     OPENROUTER_PROVIDER_ORDER,
     OPENROUTER_TIMEOUT_SECONDS,
@@ -47,15 +48,14 @@ def _csv(value: str) -> list[str]:
 
 
 def _order_applies_to(model: str | None, order: list[str]) -> bool:
-    """Whether the pinned provider order should be applied to this model.
+    """Whether a pinned provider order should be applied to this model.
 
-    The pinned providers only serve their own vendor's models (the "OpenAI"
-    provider serves `openai/*`, not `anthropic/*`). Applying an order to a model
-    the provider cannot serve, with fallbacks off, would error the call. So the
-    order is applied only when the model's vendor prefix matches the first
-    pinned provider. A model with no match (the Anthropic judge and
-    contradiction classifier) keeps its own routing. When the model is unknown,
-    apply the order rather than silently dropping the pin.
+    A pinned provider only serves its own vendor's models (the "OpenAI" provider
+    serves `openai/*`, not `anthropic/*`). Applying an order to a model the
+    provider cannot serve, with fallbacks off, would error the call. So an order
+    applies only when the model's vendor prefix matches the order's first
+    provider. When the model is unknown, the agent pin is assumed to apply
+    rather than silently dropping it.
     """
     if not order:
         return False
@@ -65,21 +65,39 @@ def _order_applies_to(model: str | None, order: list[str]) -> bool:
     return vendor == order[0].strip().lower()
 
 
+def _pinned_orders() -> list[list[str]]:
+    """The configured provider orders, agent pin first then judge pin.
+
+    Each model family is pinned to its own provider: PROVIDER_ORDER for the
+    agent (openai/*), JUDGE_PROVIDER_ORDER for the Anthropic judge and
+    contradiction classifier. provider_routing applies whichever order matches
+    the call's model vendor.
+    """
+    orders = []
+    for raw in (OPENROUTER_PROVIDER_ORDER, OPENROUTER_JUDGE_PROVIDER_ORDER):
+        order = _csv(raw)
+        if order:
+            orders.append(order)
+    return orders
+
+
 def provider_routing(model: str | None = None) -> dict[str, Any] | None:
     """Build OpenRouter's `provider` preference object, or None if unconstrained.
 
-    Constraints come from config: an ignore list (default: Azure), a pinned
-    provider order (default: OpenAI), and a fallback flag (default: off). The
-    order is applied per model family so the OpenAI pin does not break the
-    Anthropic judge. Azure is excluded on every call regardless of model.
-    Returns None only if nothing applies, so callers can skip the field.
+    Constraints come from config: an ignore list (default: Azure) and per-vendor
+    pinned orders (agent: OpenAI, judge: Anthropic) with fallbacks off. The order
+    whose provider serves the call's model vendor is applied, so each model
+    family lands on a single provider without breaking the other. Azure is
+    excluded on every call regardless of model. Returns None only if nothing
+    applies, so callers can skip the field.
     """
     routing: dict[str, Any] = {}
-    order = _csv(OPENROUTER_PROVIDER_ORDER)
     ignore = _csv(OPENROUTER_IGNORE_PROVIDERS)
-    if _order_applies_to(model, order):
-        routing["order"] = order
-        routing["allow_fallbacks"] = OPENROUTER_ALLOW_FALLBACKS
+    for order in _pinned_orders():
+        if _order_applies_to(model, order):
+            routing["order"] = order
+            routing["allow_fallbacks"] = OPENROUTER_ALLOW_FALLBACKS
+            break
     if ignore:
         routing["ignore"] = ignore
     if not routing:
