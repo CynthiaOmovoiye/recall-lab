@@ -41,23 +41,30 @@ OPENROUTER_TIMEOUT_SECONDS = float(os.environ.get("RECALL_OPENROUTER_TIMEOUT", "
 # Provider routing. OpenRouter routes a model across providers
 # non-deterministically. That adds variance unrelated to the memory
 # architecture, and once killed a run outright when Azure's content filter
-# false-flagged a benign prompt as a jailbreak. So routing is constrained here.
+# false-flagged a benign prompt as a jailbreak. So routing is pinned here for
+# reproducibility.
 #
-# - IGNORE drops named providers entirely. Azure is ignored by default to stop
-#   the content-filter false-positive. Ignoring a provider that does not serve
-#   a given model is a harmless no-op, so this is safe to apply to every call.
-# - ORDER pins a preferred provider order (comma-separated slugs). Leave empty
-#   by default: a global order would break calls to a model that provider does
-#   not serve (e.g. forcing "OpenAI" onto the Anthropic judge). Set it only when
-#   every model in play is served by the listed providers.
-# - ALLOW_FALLBACKS lets routing fall back past the constraints when a provider
-#   is down. Set false for strict reproducibility, accepting that a provider
-#   outage then fails the call instead of silently rerouting.
-OPENROUTER_IGNORE_PROVIDERS = os.environ.get("RECALL_OPENROUTER_IGNORE_PROVIDERS", "Azure")
-OPENROUTER_PROVIDER_ORDER = os.environ.get("RECALL_OPENROUTER_PROVIDER_ORDER", "")
+# The agent model openai/gpt-4o-mini is OpenAI-proprietary: on OpenRouter only
+# OpenAI and Azure serve it. Azure was the false-positive. OpenAI direct runs no
+# extra jailbreak filter on top of OpenAI's own moderation, so it is the pinned
+# provider. The pin is OpenAI, fallbacks are off, and Azure stays excluded.
+#
+# - ORDER pins a preferred provider order (comma-separated slugs). The order is
+#   applied per model family: llm.py only applies it to a call whose model
+#   vendor matches the pinned provider (openai/* -> OpenAI). A model the pinned
+#   provider does not serve (the Anthropic judge and contradiction classifier)
+#   keeps its own routing, so the pin does not break those calls.
+# - ALLOW_FALLBACKS off means a pinned call that the provider cannot serve
+#   errors instead of silently rerouting. That is the point: no silent provider
+#   switch mid-campaign. Transient blips are still absorbed by client retries.
+# - IGNORE drops named providers entirely, on every call. Azure stays ignored
+#   so a non-OpenAI model can never land on it either. Ignoring a provider that
+#   does not serve a given model is a harmless no-op.
+OPENROUTER_PROVIDER_ORDER = os.environ.get("RECALL_OPENROUTER_PROVIDER_ORDER", "OpenAI")
 OPENROUTER_ALLOW_FALLBACKS = os.environ.get(
-    "RECALL_OPENROUTER_ALLOW_FALLBACKS", "true"
+    "RECALL_OPENROUTER_ALLOW_FALLBACKS", "false"
 ).strip().lower() in {"1", "true", "yes"}
+OPENROUTER_IGNORE_PROVIDERS = os.environ.get("RECALL_OPENROUTER_IGNORE_PROVIDERS", "Azure")
 
 # Memory
 WORKING_MAX_TURNS = 6  # recent turns injected alongside the brief
