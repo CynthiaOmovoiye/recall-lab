@@ -122,7 +122,7 @@ All model calls go through one client factory (`recall_lab/llm.py`) with shared 
 
 ## Status
 
-Last update: May 26, 2026.
+Last update: May 31, 2026.
 
 Working now:
 
