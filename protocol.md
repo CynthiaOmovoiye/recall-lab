@@ -82,12 +82,12 @@ Before results are published, this file should include:
 
 Model calls are pinned for reproducibility, because OpenRouter routes a model across providers non-deterministically and that adds variance unrelated to the memory architecture.
 
-- Pinned provider order: `OpenAI` for the agent model (`openai/gpt-4o-mini`). OpenAI is one of only two providers that serve this model on OpenRouter, and it runs no extra content filter on top of OpenAI's own moderation.
+- Pinned provider for the agent model (`openai/gpt-4o-mini`): `OpenAI`. OpenAI is one of only two providers that serve this model on OpenRouter, and it runs no extra content filter on top of OpenAI's own moderation.
+- Pinned provider for the judge and contradiction classifier (`anthropic/claude-sonnet-4.6`): `Anthropic`. The agent pin cannot serve an Anthropic model, so each model family pins to its own provider. Both land on one provider every run, which is what makes the campaign reproducible: a reviewer can say which provider scored which run.
 - Fallbacks: off. A pinned call that the provider cannot serve errors instead of silently rerouting. Transient blips are still absorbed by client-level retries.
 - Ignored providers: `Azure`, on every call. The May 29 research-log entry records an Azure content-filter false-positive that flagged a benign shopping-assistant prompt as a jailbreak and killed a variance run.
-- The Anthropic judge and contradiction classifier are not pinned to a single provider; the OpenAI pin cannot serve them. They route among Anthropic's providers with Azure excluded. Pinning them to a single provider is noted in Future work.
 
-These values live in `recall_lab/config.py` and `.env.example`: `RECALL_OPENROUTER_PROVIDER_ORDER=OpenAI`, `RECALL_OPENROUTER_ALLOW_FALLBACKS=false`, `RECALL_OPENROUTER_IGNORE_PROVIDERS=Azure`.
+These values live in `recall_lab/config.py` and `.env.example`: `RECALL_OPENROUTER_PROVIDER_ORDER=OpenAI`, `RECALL_OPENROUTER_JUDGE_PROVIDER_ORDER=Anthropic`, `RECALL_OPENROUTER_ALLOW_FALLBACKS=false`, `RECALL_OPENROUTER_IGNORE_PROVIDERS=Azure`.
 
 ## Falsification target
 

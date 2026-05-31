@@ -14,8 +14,9 @@ from recall_lab import llm
 
 @pytest.fixture
 def pinned(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Apply the shipped defaults: pin OpenAI, no fallback, ignore Azure."""
+    """Apply the shipped defaults: pin OpenAI (agent) and Anthropic (judge)."""
     monkeypatch.setattr(llm, "OPENROUTER_PROVIDER_ORDER", "OpenAI")
+    monkeypatch.setattr(llm, "OPENROUTER_JUDGE_PROVIDER_ORDER", "Anthropic")
     monkeypatch.setattr(llm, "OPENROUTER_ALLOW_FALLBACKS", False)
     monkeypatch.setattr(llm, "OPENROUTER_IGNORE_PROVIDERS", "Azure")
 
@@ -29,10 +30,20 @@ def test_agent_model_is_pinned_to_openai_with_no_fallback(pinned: None) -> None:
     }
 
 
-def test_anthropic_judge_is_not_pinned_to_openai(pinned: None) -> None:
-    # The OpenAI order must NOT be applied to an Anthropic model, or the call
-    # would error with fallbacks off. Azure stays excluded; no order, no fallback key.
+def test_anthropic_judge_is_pinned_to_anthropic(pinned: None) -> None:
+    # The judge model pins to Anthropic, not the OpenAI agent order, so it lands
+    # on one provider every run instead of whichever Anthropic node load balances.
     routing = llm.provider_routing("anthropic/claude-sonnet-4.6")
+    assert routing == {
+        "order": ["Anthropic"],
+        "allow_fallbacks": False,
+        "ignore": ["Azure"],
+    }
+
+
+def test_unpinned_vendor_keeps_own_routing(pinned: None) -> None:
+    # A model matching neither pin gets no order, just Azure excluded.
+    routing = llm.provider_routing("meta/llama-3.1-8b")
     assert routing == {"ignore": ["Azure"]}
     assert "order" not in routing
 
@@ -51,12 +62,14 @@ def test_azure_excluded_for_every_model(pinned: None) -> None:
 
 def test_empty_config_means_no_routing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm, "OPENROUTER_PROVIDER_ORDER", "")
+    monkeypatch.setattr(llm, "OPENROUTER_JUDGE_PROVIDER_ORDER", "")
     monkeypatch.setattr(llm, "OPENROUTER_IGNORE_PROVIDERS", "")
     assert llm.provider_routing("openai/gpt-4o-mini") is None
 
 
 def test_order_match_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(llm, "OPENROUTER_PROVIDER_ORDER", "openai")
+    monkeypatch.setattr(llm, "OPENROUTER_JUDGE_PROVIDER_ORDER", "")
     monkeypatch.setattr(llm, "OPENROUTER_ALLOW_FALLBACKS", False)
     monkeypatch.setattr(llm, "OPENROUTER_IGNORE_PROVIDERS", "Azure")
     routing = llm.provider_routing("OpenAI/GPT-4O-Mini")
