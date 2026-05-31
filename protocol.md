@@ -4,22 +4,27 @@ Status: draft protocol, to be completed before first results are published.
 
 ## Research question
 
-Does selective consolidation with decay improve long-horizon agent coherence and honest failure compared with common memory baselines?
+Does validity-state memory consolidation with user-only salience improve long-horizon agent coherence and honest failure compared with sliding-window, budget-matched recency, and flat vector-retrieval baselines?
 
 ## Hypothesis
 
-An agent that promotes high-salience exchanges into a consolidated brief and lets low-salience exchanges stop entering the prompt will maintain coherence over long conversations with fewer hallucinated recall failures than agents that only use recency windows or raw vector retrieval.
+An agent that consolidates high-salience user turns into a brief, tracks each memory's validity state (active, superseded, archived), and renders superseded memories into a `Past, no longer current` section will maintain coherence over long conversations with fewer hallucinated and stale-memory recall failures than agents that rely on recency windows or flat vector retrieval. The mechanism under test is validity state plus user-only salience: only user turns can grant a memory authority, and a corrected fact loses authority without being erased.
 
 ## Conditions
 
-- Recall Lab: LLM-judged consolidation with decay
-- Sliding window: last N turns only
-- Raw vector retrieval: top-k similar raw exchanges
-- Compressed vector retrieval: top-k extracted semantic facts
-- Full long context: full conversation when it fits
-- Consolidated brief without decay
-- Random-curated brief
-- Human-curated brief
+Built today:
+
+- Recall Lab brief-backed memory: user-only salience consolidation with validity state and a `Past, no longer current` section. The mechanism under test.
+- Sliding window: last N turns only.
+- Budget-matched sliding window: a recency window sized to Recall Lab's per-turn input-token budget, so the comparison is not about prompt length.
+- Flat vector retrieval: top-k similar raw exchanges, no validity state.
+
+Planned, not built yet (one-line cost to build):
+
+- Compressed vector retrieval: top-k extracted semantic facts. Cost: an extraction pass over the log plus an embed-and-store step on the compressed facts, roughly a day.
+- Full long-context oracle: full conversation in context where it fits. Cost: a thin agent that concatenates the whole log, plus per-model context-limit handling, half a day.
+- Random-curated brief: a brief filled with randomly selected exchanges at Recall Lab's size. Cost: a sampler over the log, a few hours. Isolates curation quality from brief format.
+- Human-curated brief: a brief hand-written by a person from the same log. Cost: a labeling tool plus annotator time, the largest of the planned items.
 
 ## Planned dataset
 
@@ -68,11 +73,31 @@ Before results are published, this file should include:
 - retrieval top-k
 - embedding model
 - salience threshold
-- decay policy
+- validity-transition and supersession policy
 - prompt templates
 - scoring scripts
 - dataset generation method
 
+### Provider routing
+
+Model calls are pinned for reproducibility, because OpenRouter routes a model across providers non-deterministically and that adds variance unrelated to the memory architecture.
+
+- Pinned provider order: `OpenAI` for the agent model (`openai/gpt-4o-mini`). OpenAI is one of only two providers that serve this model on OpenRouter, and it runs no extra content filter on top of OpenAI's own moderation.
+- Fallbacks: off. A pinned call that the provider cannot serve errors instead of silently rerouting. Transient blips are still absorbed by client-level retries.
+- Ignored providers: `Azure`, on every call. The May 29 research-log entry records an Azure content-filter false-positive that flagged a benign shopping-assistant prompt as a jailbreak and killed a variance run.
+- The Anthropic judge and contradiction classifier are not pinned to a single provider; the OpenAI pin cannot serve them. They route among Anthropic's providers with Azure excluded. Pinning them to a single provider is noted in Future work.
+
+These values live in `recall_lab/config.py` and `.env.example`: `RECALL_OPENROUTER_PROVIDER_ORDER=OpenAI`, `RECALL_OPENROUTER_ALLOW_FALLBACKS=false`, `RECALL_OPENROUTER_IGNORE_PROVIDERS=Azure`.
+
 ## Falsification target
 
-If the consolidated-brief-with-decay variant shows no improvement over the consolidated-brief-without-decay variant on honest-failure metrics, the selective-consolidation-with-decay hypothesis is falsified for this setup.
+If the validity-state brief shows no improvement over flat vector retrieval and the budget-matched recency baseline on honest-failure metrics across the 30-conversation campaign, the validity-state hypothesis is falsified for this setup.
+
+## Future work
+
+Not part of the current hypothesis or campaign. Each is its own job.
+
+- Decay. A retrievability decay over the brief, so quiet stale memories fade without a correction. `DECAY_HALF_LIFE_DAYS` exists in config and an ACT-R style activation function exists, but the brief decay policy raises `NotImplementedError`. When built, the test is whether brief-with-decay beats brief-without-decay on honest-failure, the original decay hypothesis.
+- Learned authority. Today authority is rule-based: a user correction supersedes the old fact. Whether authority can be learned from data instead is open.
+- Multi-agent memory. Shared or per-agent validity state across more than one agent.
+- The planned conditions above that are not built: compressed vector retrieval, the full long-context oracle, and the random-curated and human-curated brief controls.
