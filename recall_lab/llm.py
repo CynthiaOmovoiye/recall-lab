@@ -46,23 +46,44 @@ def _csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def provider_routing() -> dict[str, Any] | None:
+def _order_applies_to(model: str | None, order: list[str]) -> bool:
+    """Whether the pinned provider order should be applied to this model.
+
+    The pinned providers only serve their own vendor's models (the "OpenAI"
+    provider serves `openai/*`, not `anthropic/*`). Applying an order to a model
+    the provider cannot serve, with fallbacks off, would error the call. So the
+    order is applied only when the model's vendor prefix matches the first
+    pinned provider. A model with no match (the Anthropic judge and
+    contradiction classifier) keeps its own routing. When the model is unknown,
+    apply the order rather than silently dropping the pin.
+    """
+    if not order:
+        return False
+    if model is None:
+        return True
+    vendor = model.split("/", 1)[0].strip().lower()
+    return vendor == order[0].strip().lower()
+
+
+def provider_routing(model: str | None = None) -> dict[str, Any] | None:
     """Build OpenRouter's `provider` preference object, or None if unconstrained.
 
-    Constraints come from config: an ignore list (default: Azure), an optional
-    pinned order, and a fallback flag. Returns None only if nothing is set, so
-    callers can skip the field entirely.
+    Constraints come from config: an ignore list (default: Azure), a pinned
+    provider order (default: OpenAI), and a fallback flag (default: off). The
+    order is applied per model family so the OpenAI pin does not break the
+    Anthropic judge. Azure is excluded on every call regardless of model.
+    Returns None only if nothing applies, so callers can skip the field.
     """
     routing: dict[str, Any] = {}
     order = _csv(OPENROUTER_PROVIDER_ORDER)
     ignore = _csv(OPENROUTER_IGNORE_PROVIDERS)
-    if order:
+    if _order_applies_to(model, order):
         routing["order"] = order
+        routing["allow_fallbacks"] = OPENROUTER_ALLOW_FALLBACKS
     if ignore:
         routing["ignore"] = ignore
     if not routing:
         return None
-    routing["allow_fallbacks"] = OPENROUTER_ALLOW_FALLBACKS
     return routing
 
 
@@ -70,10 +91,11 @@ def complete(client: OpenAI, **kwargs: Any):
     """Create a chat completion with provider routing applied.
 
     A thin wrapper over `client.chat.completions.create` that injects the
-    configured provider preferences into `extra_body`. Use this instead of
+    configured provider preferences into `extra_body`. Routing is keyed off the
+    call's own `model`, so the pin follows the model family. Use this instead of
     calling `.create` directly so routing constraints hold everywhere.
     """
-    routing = provider_routing()
+    routing = provider_routing(kwargs.get("model"))
     if routing is not None:
         extra_body = dict(kwargs.get("extra_body") or {})
         extra_body["provider"] = routing
