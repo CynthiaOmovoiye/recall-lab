@@ -50,17 +50,24 @@ OPENROUTER_TIMEOUT_SECONDS = float(os.environ.get("RECALL_OPENROUTER_TIMEOUT", "
 # provider. The pin is OpenAI, fallbacks are off, and Azure stays excluded.
 #
 # - ORDER pins a preferred provider order (comma-separated slugs). The order is
-#   applied per model family: llm.py only applies it to a call whose model
-#   vendor matches the pinned provider (openai/* -> OpenAI). A model the pinned
-#   provider does not serve (the Anthropic judge and contradiction classifier)
-#   keeps its own routing, so the pin does not break those calls.
+#   applied per model family: llm.py applies it only to a call whose model
+#   vendor matches the order's provider (openai/* -> OpenAI). PROVIDER_ORDER
+#   pins the agent model; JUDGE_PROVIDER_ORDER pins the Anthropic judge and
+#   contradiction classifier. A model matching neither keeps its own routing.
 # - ALLOW_FALLBACKS off means a pinned call that the provider cannot serve
 #   errors instead of silently rerouting. That is the point: no silent provider
 #   switch mid-campaign. Transient blips are still absorbed by client retries.
 # - IGNORE drops named providers entirely, on every call. Azure stays ignored
 #   so a non-OpenAI model can never land on it either. Ignoring a provider that
 #   does not serve a given model is a harmless no-op.
+#
+# Both model families are pinned so the 30-conversation campaign is fully
+# reproducible: a reviewer can say which provider scored which run, not
+# "whichever Anthropic node the load balancer sent it to."
 OPENROUTER_PROVIDER_ORDER = os.environ.get("RECALL_OPENROUTER_PROVIDER_ORDER", "OpenAI")
+OPENROUTER_JUDGE_PROVIDER_ORDER = os.environ.get(
+    "RECALL_OPENROUTER_JUDGE_PROVIDER_ORDER", "Anthropic"
+)
 OPENROUTER_ALLOW_FALLBACKS = os.environ.get(
     "RECALL_OPENROUTER_ALLOW_FALLBACKS", "false"
 ).strip().lower() in {"1", "true", "yes"}
