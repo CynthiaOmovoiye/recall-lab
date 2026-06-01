@@ -835,3 +835,30 @@ One run died on an Azure content-filter false-positive: a benign shopping-assist
 ### Status of the public claim
 
 These results clear the variance bar v5 and v9 met, so the README's scoped claim can now widen to name the vector and equal-budget controls. Caveats that stay attached: a single scenario, four to five runs, no statistical test yet, and the provider-routing noise above. The 30-conversation protocol in `protocol.md` is still the next real milestone.
+
+---
+
+## May 31, 2026. v11 pinned reruns: the spread collapsed.
+
+After PR #14 (agent pin to OpenAI) and PR #15 (judge pin to Anthropic) merged, reran the v10 campaigns on `relocation_chain` under the pinned setup. Two campaigns, 5 runs each, 3-call judge audit. Both completed 5/5. Labels `v11_pinned_vector_control` and `v11_pinned_equal_budget_1x`.
+
+Pre-pin v10 vs pinned v11, mean recall accuracy:
+
+| Agent | v10 (pre-pin) | v11 (pinned) |
+| --- | --- | --- |
+| sliding_window_2 | 0.00 | 0.00 |
+| vector_topk_5 | 0.55 (range 0.40-0.80, n=4) | 0.40 (range 0.40-0.40, n=5) |
+| budgeted_window (equal budget) | 0.04 (range 0.00-0.20) | 0.00 (range 0.00-0.00) |
+| recall_lab_brief_window_2 | 1.00 | 1.00 |
+
+The read. The spread tightened to zero on both controls. Pre-pin, the vector control ranged 0.40 to 0.80; pinned, it is 0.40 every run. Pre-pin, the budgeted recency baseline wobbled 0.00 to 0.20; pinned, it is 0.00 every run. Recall Lab held 1.00 throughout, pre-pin and pinned.
+
+This is the second of the two useful outcomes named when the rerun was planned. The numbers did not just hold within their old intervals; the variance that produced those intervals was largely provider-routing noise. With the model fixed to one provider per family, the controls are deterministic on this scenario at temperature zero for the judge and near-deterministic for the agents. So the pin is not only a reproducibility hygiene step. It is evidence that part of the pre-pin spread came from the provider lottery, not from the memory strategy.
+
+Per-question, pinned vector still tells the same mechanism story: color 5/5 and shellfish 5/5, the two facts that never change, and 0/5 on all three chain questions (current city, previous city, first city). Similarity keeps stable facts and cannot order superseded ones. The pin sharpened the picture: the chain failure is now total and consistent, not occasionally masked by a lucky retrieval.
+
+Judge audit: vector campaign 1 split verdict of 75 graded answers (run 1, the vector previous-city answer split correct/hallucinated/hallucinated, majority hallucinated, scored as a miss). Equal-budget campaign 0 splits of 50. Consistent with v9 and v10: the judge is stable.
+
+Headline table from here on cites pinned runs. The pinned numbers are: sliding 0.00, equal-budget recency 0.00, vector 0.40, Recall Lab 1.00, all on `relocation_chain`.
+
+Operational note. The reruns took several attempts. Session-bound background runs were killed by session interrupts, and one earlier batch lost runs to a transient APIConnectionError. The clean 5/5 came from running both campaigns directly in a terminal, sequentially. For the 30-conversation campaign, run it in a real terminal or a detached process, not a session-tied background job.

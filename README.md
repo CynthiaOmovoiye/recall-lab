@@ -92,7 +92,7 @@ Same conversational task, different memory strategy:
 - budget-bounded sliding window for the equal-token-budget control
 - full long context, planned where possible
 
-The two-turn window makes the mechanism visible but is not a fair benchmark. The equal-token-budget control answers the obvious objection to it: a budget-bounded sliding window is given the same input-token budget Recall Lab actually spends, so the comparison stops being about prompt length. Both controls have now run on the relocation chain: the vector control plateaus around `0.55` and the budget-matched recency baseline sits near `0.04`, while Recall Lab holds `1.00`. See the status section for the per-question breakdown.
+The two-turn window makes the mechanism visible but is not a fair benchmark. The equal-token-budget control answers the obvious objection to it: a budget-bounded sliding window is given the same input-token budget Recall Lab actually spends, so the comparison stops being about prompt length. Both controls have now run on the relocation chain under a pinned provider: the vector control sits at `0.40` and the budget-matched recency baseline at `0.00`, while Recall Lab holds `1.00`. See the status section for the per-question breakdown.
 
 ## Metrics
 
@@ -159,9 +159,10 @@ Observed so far:
 - Relocation-chain trial v9: sliding window `0.00`, Recall Lab `1.00` across five runs.
 - In v9, Recall Lab passed current city, previous city, first city, color, and safety restriction at `5/5` each.
 - v9 judge audit: `0` split verdicts out of `50` graded answers.
-- Vector-retrieval control v10 on the relocation chain, four runs: sliding `0.00`, vector mean `0.55` (range `0.40`–`0.80`), Recall Lab `1.00`. The vector control passed the stable facts (color and shellfish) `4/4` but failed the chain: current city `1/4`, previous city `2/4`, first city `0/4`. Similarity retrieval keeps stable facts and cannot order superseded ones.
-- Equal-token-budget control v10, five runs: Recall Lab `1.00`, budget-matched recency baseline mean `0.04`. Handing the recency baseline Recall Lab's full per-turn token budget did not close the gap.
-- v10 judge audit: `0` split verdicts out of `110` graded answers across both campaigns.
+- Vector-retrieval control, pinned-provider rerun (v11) on the relocation chain, five runs: sliding `0.00`, vector `0.40` (range `0.40`–`0.40`), Recall Lab `1.00`. The vector control passed the stable facts (color and shellfish) `5/5` but failed the chain: current city `0/5`, previous city `0/5`, first city `0/5`. Similarity retrieval keeps stable facts and cannot order superseded ones.
+- Equal-token-budget control, pinned-provider rerun (v11), five runs: Recall Lab `1.00`, budget-matched recency baseline `0.00`. Handing the recency baseline Recall Lab's full per-turn token budget did not close the gap.
+- Provider pin tightened the spread. Pre-pin (v10) the vector control ranged `0.40`–`0.80` (mean `0.55`) and the recency baseline `0.00`–`0.20` (mean `0.04`); pinned (v11) both are flat at `0.40` and `0.00`. Part of the pre-pin variance was provider-routing noise, not the memory strategy. Recall Lab held `1.00` in both.
+- Judge audit across the pinned reruns: `1` split verdict out of `125` graded answers.
 
 Still incomplete:
 
@@ -248,7 +249,7 @@ Reports go under `reports/`. Report outputs are local artifacts and should not b
 
 The current honest claim is narrow:
 
-> On two synthetic multi-day memory scenarios, Recall Lab's brief-backed memory with validity state and user-only salience held `1.00` recall while three baselines did not: a two-turn sliding window (`0.00`), flat vector retrieval (mean `0.55`, which keeps stable facts but cannot order a chain of corrections), and a sliding window given Recall Lab's full per-turn token budget (mean `0.04`). The result shows a mechanism, not a benchmark.
+> On two synthetic multi-day memory scenarios, with model calls pinned to one provider per family for reproducibility, Recall Lab's brief-backed memory with validity state and user-only salience held `1.00` recall while three baselines did not: a two-turn sliding window (`0.00`), flat vector retrieval (`0.40`, which keeps stable facts but cannot order a chain of corrections), and a sliding window given Recall Lab's full per-turn token budget (`0.00`). The result shows a mechanism, not a benchmark.
 
 The vector control isolates the contribution of validity state: standard retrieval recalls un-superseded facts but fails the relocation chain. The equal-token-budget control shows the win is not prompt length: matching the recency baseline's budget to Recall Lab's does not close the gap.
 
