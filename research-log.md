@@ -862,3 +862,21 @@ Judge audit: vector campaign 1 split verdict of 75 graded answers (run 1, the ve
 Headline table from here on cites pinned runs. The pinned numbers are: sliding 0.00, equal-budget recency 0.00, vector 0.40, Recall Lab 1.00, all on `relocation_chain`.
 
 Operational note. The reruns took several attempts. Session-bound background runs were killed by session interrupts, and one earlier batch lost runs to a transient APIConnectionError. The clean 5/5 came from running both campaigns directly in a terminal, sequentially. For the 30-conversation campaign, run it in a real terminal or a detached process, not a session-tied background job.
+
+---
+
+## May 31, 2026. Episodic read-time-judge baseline, and the paper that motivates it.
+
+Paper of note: "Useful Memories Become Faulty When Continuously Updated by LLMs" (arxiv 2605.12978). It tested repeated LLM rewriting of memory and found the memory degrades over time. Its winning recipe was to keep raw traces and decide the current answer at read time, which beat the rewriting approaches.
+
+This cuts toward Recall Lab's core premise, so it is worth confronting directly. The sleep job is a rewriting loop: it compresses, supersedes, and re-renders the brief each day, which is the pattern the paper punishes. The protection is that the raw episodic log is never discarded; the brief is derived and the SQLite trace store is ground truth. The paper's winning recipe is half of what the system already keeps.
+
+So built the control the paper implies: `recall_lab/controls/episodic.py`, the `EpisodicJudgeAgent`. Keep every statement verbatim, inject the whole log each turn, ask the model to work out the current answer at read time. No compression, no supersede, no consolidation. It implements the `.respond` protocol and reports `last_input_tokens` so the runner can chart its growing input bill against the brief's flat one.
+
+Wired into `multiday_trial.py` as `--agents episodic` (and folded into `all`) with `run_episodic_trial`, and into `variance.py`'s lineup. Tests in `tests/test_episodic_control.py` cover the raw-history plumbing offline: verbatim retention, oldest-first order, nothing dropped or compressed, and the API-key guard. 41 tests pass, ruff clean.
+
+What it answers. Does validity-state consolidation actually beat keeping everything raw? Two ways the brief can still win. Accuracy: if raw history confuses the model on a long correction chain, the brief's explicit Past section wins on correctness. Cost: even if raw ties on accuracy on the short relocation chain, it pays a growing input-token bill while the brief stays bounded. The crossover, where long logs make raw too expensive and consolidation starts to pay, is the Chapter 3 result.
+
+Next step. Run `--agents episodic` on the relocation chain under the pinned provider, alongside the existing controls, and chart accuracy and mean input tokens per turn. If raw beats the brief on accuracy here, the paper is right for this setup and the sleep job needs to justify itself on cost or on a longer scenario. Report either way before widening any claim. Not run yet; the runner and control are in place.
+
+Other papers from the same scan, logged for the trail: Memora: From Recall to Forgetting (arxiv 2604.20006), EvoMemBench (arxiv 2605.18421), Memory-Induced Tool-Drift in LLM Agents (arxiv 2605.24941).

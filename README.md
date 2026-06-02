@@ -90,6 +90,7 @@ Same conversational task, different memory strategy:
 - Recall Lab brief-backed agent
 - flat vector retrieval (ChromaDB, standard-RAG default)
 - budget-bounded sliding window for the equal-token-budget control
+- raw episodic read-time judge (keep everything, decide at read time)
 - full long context, planned where possible
 
 The two-turn window makes the mechanism visible but is not a fair benchmark. The equal-token-budget control answers the obvious objection to it: a budget-bounded sliding window is given the same input-token budget Recall Lab actually spends, so the comparison stops being about prompt length. Both controls have now run on the relocation chain under a pinned provider: the vector control sits at `0.40` and the budget-matched recency baseline at `0.00`, while Recall Lab holds `1.00`. See the status section for the per-question breakdown.
@@ -139,6 +140,7 @@ Working now:
 - `consolidation/sleep.py` routes promoted memories through salience, trace creation, contradiction checks, validity transitions, activation ranking, and brief rendering.
 - `controls/vector.py` implements the flat vector-retrieval control: each exchange is embedded in an isolated in-memory ChromaDB collection and the top-k most similar are retrieved per turn. It has no validity state, so a superseded fact and its correction compete on similarity alone. The embedding function is injectable for offline, key-free tests.
 - `controls/budgeted.py` implements a sliding window bounded by an input-token budget instead of a turn count, for the equal-token-budget comparison.
+- `controls/episodic.py` implements the raw episodic read-time-judge control: keep every statement verbatim, inject the whole log each turn, and ask the model to work out the current answer. No consolidation runs. This is the "just keep everything" baseline from arxiv 2605.12978, which found that repeatedly rewriting memory degrades it. It tests whether validity-state consolidation beats raw retention, on accuracy and on the growing input-token cost.
 - `eval/equal_budget_trial.py` measures Recall Lab's mean input tokens per turn, then runs the budget-matched recency baseline on the same scenario and reports accuracy at equal token budget.
 - `multiday_trial.py` now records an input-token estimate per turn and supports the vector control via `--agents vector` or `--agents all`.
 - `eval/metrics.py` uses an LLM scorer with a stricter rubric. Variance runs can audit each answer with three judge calls.

@@ -22,6 +22,7 @@ from typing import Any, Literal
 
 from recall_lab.agent import RecallAgent
 from recall_lab.consolidation.sleep import run_sleep_job
+from recall_lab.controls.episodic import EpisodicJudgeAgent
 from recall_lab.controls.sliding import SlidingWindowAgent
 from recall_lab.controls.vector import VectorRetrievalAgent
 from recall_lab.eval.metrics import FailureMode, estimate_tokens, judge_answer
@@ -32,7 +33,7 @@ from recall_lab.memory.traces import MemoryTraceStore
 DEFAULT_SCENARIO = Path("scenarios/retail_memory_week.json")
 DEFAULT_OUT_DIR = Path("reports/retail_memory_week")
 DEFAULT_VECTOR_TOP_K = 5
-AgentChoice = Literal["sliding", "recall", "vector", "both", "all"]
+AgentChoice = Literal["sliding", "recall", "vector", "episodic", "both", "all"]
 
 
 @dataclass
@@ -274,6 +275,71 @@ def run_vector_trial(
     return result
 
 
+def run_episodic_trial(
+    scenario: dict[str, Any],
+    days: list[dict[str, Any]],
+    judge_samples: int = 1,
+    verbose: bool = False,
+) -> AgentTrialResult:
+    """Run the full scenario through the raw episodic read-time-judge control.
+
+    Keeps every statement raw and injects the whole log each turn, then asks the
+    model to work out the current answer. No consolidation runs. This is the
+    "just keep everything" baseline from arxiv 2605.12978; the comparison of
+    interest is accuracy at a growing input-token cost versus the brief's flat
+    one.
+    """
+    agent = EpisodicJudgeAgent()
+    result = AgentTrialResult(agent_name="episodic_judge")
+
+    for day in days:
+        label = day.get("label", "day")
+        turns = day.get("turns", [])
+        for i, user_turn in enumerate(turns, start=1):
+            if verbose:
+                print(f"[episodic] {label}: turn {i}/{len(turns)}")
+            response = agent.respond(user_turn)
+            result.records.append(
+                AnswerRecord(
+                    phase="chat",
+                    day_label=label,
+                    turn_index=i,
+                    user=user_turn,
+                    agent=response,
+                    output_tokens_estimate=estimate_tokens(response),
+                    input_tokens_estimate=agent.last_input_tokens,
+                )
+            )
+
+    final_eval = scenario.get("final_eval", {})
+    eval_label = final_eval.get("label", "final_eval")
+    questions = final_eval.get("questions", [])
+    for i, item in enumerate(questions, start=1):
+        question = item["text"]
+        expected = item["expected"]
+        if verbose:
+            print(f"[episodic] {eval_label}: question {i}/{len(questions)}")
+        response = agent.respond(question)
+        correct, mode, votes = score_answer(question, response, expected, judge_samples)
+        result.records.append(
+            AnswerRecord(
+                phase="final_eval",
+                day_label=eval_label,
+                turn_index=i,
+                user=question,
+                agent=response,
+                expected=expected,
+                failure_mode=mode.value,
+                correct=correct,
+                judge_votes=votes,
+                output_tokens_estimate=estimate_tokens(response),
+                input_tokens_estimate=agent.last_input_tokens,
+            )
+        )
+
+    return result
+
+
 def run_recall_trial(
     scenario: dict[str, Any],
     days: list[dict[str, Any]],
@@ -478,6 +544,10 @@ def run_trial(
         results.append(
             run_vector_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
         )
+    if agents in {"episodic", "all"}:
+        results.append(
+            run_episodic_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
+        )
     if agents in {"recall", "both", "all"}:
         results.append(
             run_recall_trial(
@@ -497,9 +567,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument(
         "--agents",
-        choices=["sliding", "recall", "vector", "both", "all"],
+        choices=["sliding", "recall", "vector", "episodic", "both", "all"],
         default="both",
-        help="'both' is sliding+recall. 'all' adds the vector-retrieval control.",
+        help="'both' is sliding+recall. 'all' adds the vector-retrieval and "
+        "raw-episodic controls.",
     )
     parser.add_argument("--max-days", type=int, default=None)
     parser.add_argument(

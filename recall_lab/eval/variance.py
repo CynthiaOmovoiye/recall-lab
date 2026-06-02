@@ -205,10 +205,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--agents",
-        choices=["sliding", "recall", "vector", "both", "all"],
+        choices=["sliding", "recall", "vector", "episodic", "both", "all"],
         default="both",
-        help="Multiday lineup. 'all' adds the vector-retrieval control. "
-        "Ignored in equal-budget mode.",
+        help="Multiday lineup. 'all' adds the vector-retrieval and raw-episodic "
+        "controls. Ignored in equal-budget mode.",
     )
     parser.add_argument(
         "--budget-scale",

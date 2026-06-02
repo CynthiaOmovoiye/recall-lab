@@ -18,6 +18,7 @@ Built today:
 - Sliding window: last N turns only.
 - Budget-matched sliding window: a recency window sized to Recall Lab's per-turn input-token budget, so the comparison is not about prompt length.
 - Flat vector retrieval: top-k similar raw exchanges, no validity state.
+- Raw episodic read-time judge: keep every statement verbatim, inject the whole log each turn, decide the current answer at read time. No consolidation. The "just keep everything" baseline from arxiv 2605.12978, which reported that repeatedly rewriting memory degrades it. Tests whether consolidation beats raw retention on accuracy and on input-token cost as the log grows.
 
 Planned, not built yet (one-line cost to build):
 
