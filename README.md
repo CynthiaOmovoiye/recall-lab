@@ -89,11 +89,15 @@ Same conversational task, different memory strategy:
 - naive sliding window
 - Recall Lab brief-backed agent
 - flat vector retrieval (ChromaDB, standard-RAG default)
+- strong RAG: a production-grade pipeline with query rewriting, hybrid dense and BM25 retrieval fused with Reciprocal Rank Fusion, a recency boost, and a reranker
+- strong RAG with date metadata (`strong_rag_dated`): timestamp recency plus a metadata-by-date filter
 - budget-bounded sliding window for the equal-token-budget control
 - raw episodic read-time judge (keep everything, decide at read time)
 - full long context, planned where possible
 
-The two-turn window makes the mechanism visible but is not a fair benchmark. The equal-token-budget control answers the obvious objection to it: a budget-bounded sliding window is given the same input-token budget Recall Lab actually spends, so the comparison stops being about prompt length. Both controls have now run on the relocation chain under a pinned provider: the vector control sits at `0.40` and the budget-matched recency baseline at `0.00`, while Recall Lab holds `1.00`. See the status section for the per-question breakdown.
+The two-turn window makes the mechanism visible but is not a fair benchmark. The strong RAG control answers the strongest objection, that the failure is just a weak retriever. It is the stack a serious team ships, and on the relocation chain it still cannot reconstruct a correction chain. The equal-token-budget control answers the prompt-length objection: a budget-bounded sliding window is given the same input-token budget Recall Lab actually spends.
+
+On the relocation chain under a pinned provider, the headline numbers are sliding window `0.00`, flat vector `0.52`, strong RAG `0.76`, raw episodic `1.00`, and Recall Lab's validity brief `1.00`. Strong RAG recovered the recent links of the chain and missed the first city every run. A fair sweep (`eval/fair_rag_sweep.py`) then varied the recency weight and top_k and handed the model the whole conversation with timestamps visible: the first city still failed under relevance ordering, and only reordering the same context chronologically recovered it (`4/5`). The fix was order of presentation, not retrieval quality. See the status section and `reports/` for the per-question breakdowns.
 
 ## Metrics
 
@@ -115,7 +119,8 @@ The output token count is currently an approximation from generated text length,
 - JSONL for memory traces
 - Markdown for the consolidated brief
 - pytest for pure-function checks
-- ChromaDB for the flat vector-retrieval control
+- ChromaDB for the dense half of retrieval
+- rank-bm25 for the lexical half of the strong RAG hybrid retrieval
 
 Deliberately small so the architecture, not the infra, is what is being measured.
 
@@ -123,7 +128,7 @@ All model calls go through one client factory (`recall_lab/llm.py`) with shared 
 
 ## Status
 
-Last update: May 31, 2026.
+Last update: June 9, 2026.
 
 Working now:
 
@@ -141,6 +146,8 @@ Working now:
 - `controls/vector.py` implements the flat vector-retrieval control: each exchange is embedded in an isolated in-memory ChromaDB collection and the top-k most similar are retrieved per turn. It has no validity state, so a superseded fact and its correction compete on similarity alone. The embedding function is injectable for offline, key-free tests.
 - `controls/budgeted.py` implements a sliding window bounded by an input-token budget instead of a turn count, for the equal-token-budget comparison.
 - `controls/episodic.py` implements the raw episodic read-time-judge control: keep every statement verbatim, inject the whole log each turn, and ask the model to work out the current answer. No consolidation runs. This is the "just keep everything" baseline from arxiv 2605.12978, which found that repeatedly rewriting memory degrades it. It tests whether validity-state consolidation beats raw retention, on accuracy and on the growing input-token cost.
+- `controls/strong_rag.py` implements the industry-standard RAG control: query rewriting, hybrid dense plus BM25 retrieval fused with Reciprocal Rank Fusion, a recency boost, and a reranker. A `strong_rag_dated` variant adds real date metadata, timestamp recency, and a metadata-by-date filter, and a `show_timestamps` and `chronological` option control whether the retrieved snippets carry dates and what order they are presented in. Every external piece is injectable, so the plumbing is tested offline without a key.
+- `eval/fair_rag_sweep.py` runs the fair RAG sweep: a recency-weight ablation, a top_k sweep, and a fair-shot config that hands the model the whole conversation with timestamps visible, in relevance order and in chronological order, to isolate whether the chain failure is retrieval reach or order of presentation.
 - `eval/equal_budget_trial.py` measures Recall Lab's mean input tokens per turn, then runs the budget-matched recency baseline on the same scenario and reports accuracy at equal token budget.
 - `multiday_trial.py` now records an input-token estimate per turn and supports the vector control via `--agents vector` or `--agents all`.
 - `eval/metrics.py` uses an LLM scorer with a stricter rubric. Variance runs can audit each answer with three judge calls.
@@ -165,6 +172,9 @@ Observed so far:
 - Equal-token-budget control, pinned-provider rerun (v11), five runs: Recall Lab `1.00`, budget-matched recency baseline `0.00`. Handing the recency baseline Recall Lab's full per-turn token budget did not close the gap.
 - Provider pin tightened the spread. Pre-pin (v10) the vector control ranged `0.40`–`0.80` (mean `0.55`) and the recency baseline `0.00`–`0.20` (mean `0.04`); pinned (v11) both are flat at `0.40` and `0.00`. Part of the pre-pin variance was provider-routing noise, not the memory strategy. Recall Lab held `1.00` in both.
 - Judge audit across the pinned reruns: `1` split verdict out of `125` graded answers.
+- Chapter 3 lineup (v12) on the relocation chain, five runs: sliding `0.00`, flat vector `0.52`, strong RAG `0.76`, raw episodic `1.00`, Recall Lab `1.00`. Strong RAG recovered the current and previous city and missed the first city `0/5`.
+- Fair RAG sweep (v14): the first city stayed at or near zero across recency weights `0.0`–`0.6` and across top_k `5`, `10`, and full context, including full context with timestamps visible in relevance order. Reordering the same context chronologically recovered it (`4/5`). The chain failure was order of presentation, not retrieval reach.
+- Date-metadata filtering (`strong_rag_dated`, v13) did not help: it perfected the current city and dropped older facts, including a stable allergy, because a date filter cannot tell an old-but-true fact from a superseded one.
 
 Still incomplete:
 
@@ -204,7 +214,8 @@ python -m recall_lab.eval.multiday_trial
 python -m recall_lab.eval.multiday_trial --scenario scenarios/retail_memory_week.json --agents both --verbose
 python -m recall_lab.eval.multiday_trial --scenario scenarios/relocation_chain.json --agents both --verbose
 
-# Add the flat vector-retrieval control (sliding + vector + recall)
+# Add every control in one run: sliding, vector, strong RAG, strong RAG with date
+# metadata, raw episodic, and the Recall Lab brief
 python -m recall_lab.eval.multiday_trial --scenario scenarios/relocation_chain.json --agents all --verbose
 
 # Run the equal-token-budget control: match the recency baseline to Recall Lab's budget
@@ -214,8 +225,24 @@ python -m recall_lab.eval.equal_budget_trial --scenario scenarios/relocation_cha
 
 # Run a 5-run variance campaign
 python -m recall_lab.eval.variance --scenario scenarios/retail_memory_week.json --label v5_past_section
-python -m recall_lab.eval.variance --scenario scenarios/relocation_chain.json --label v9_user_only_judge
+python -m recall_lab.eval.variance --scenario scenarios/relocation_chain.json --agents all --label v12_chapter3_lineup
 ```
+
+### Chapter 3 experiments
+
+These reproduce the strong-RAG and order findings from Becoming Mind Chapter 3. The key is read from `.env`, so no export is needed. Run from the repo root, in a real terminal (background jobs can be killed mid-campaign), and tune `RUNS` down to smoke-test first.
+
+```bash
+# Full lineup plus the equal-budget control, five seeds, pinned provider
+RUNS=5 bash scripts/run_chapter3.sh
+
+# The fair RAG sweep: recency-weight ablation, top_k sweep, and the chronological
+# fair-shot that shows order of presentation is the lever. Token-heavy, so it
+# defaults to a 1-call judge and RUNS=3.
+RUNS=5 bash scripts/run_fair_rag.sh
+```
+
+Both write a `*_summary.md` you can read straight from `reports/`. The committed summaries in this repo were produced by these scripts.
 
 ## Scenario editing
 
@@ -245,15 +272,19 @@ The runner reads the scenario file and keeps the same experiment logic.
 - `run_*/trial_result.json`
 - `run_*/trial_report.md`
 
-Reports go under `reports/`. Report outputs are local artifacts and should not be committed unless needed for a public lab notebook.
+`recall_lab.eval.fair_rag_sweep` writes:
+
+- `fair_rag_summary.md`: per-config accuracy, mean input-token cost, and per-question pass count
+
+Reports go under `reports/`, which is gitignored, so raw per-run outputs stay local. The campaign summaries (`variance_summary.md` and `fair_rag_summary.md`) are force-added and committed, so the numbers behind the claims are visible in the repo without carrying every run.
 
 ## Current public read
 
 The current honest claim is narrow:
 
-> On two synthetic multi-day memory scenarios, with model calls pinned to one provider per family for reproducibility, Recall Lab's brief-backed memory with validity state and user-only salience held `1.00` recall while three baselines did not: a two-turn sliding window (`0.00`), flat vector retrieval (`0.40`, which keeps stable facts but cannot order a chain of corrections), and a sliding window given Recall Lab's full per-turn token budget (`0.00`). The result shows a mechanism, not a benchmark.
+> On two synthetic multi-day memory scenarios, with model calls pinned to one provider per family for reproducibility, Recall Lab's brief-backed memory held `1.00` recall while the baselines did not: a two-turn sliding window (`0.00`), flat vector retrieval (`0.52`), and even a production-grade RAG stack with query rewriting, hybrid retrieval, reranking, and recency (`0.76`). The strong RAG stack recovered the recent links of a correction chain and missed the first one every run. A fair sweep showed the cause was order of presentation, not retrieval quality: only reordering the same retrieved context chronologically recovered the first fact, and only by carrying the whole history at a token cost the bounded brief avoids. The result shows a mechanism, not a benchmark.
 
-The vector control isolates the contribution of validity state: standard retrieval recalls un-superseded facts but fails the relocation chain. The equal-token-budget control shows the win is not prompt length: matching the recency baseline's budget to Recall Lab's does not close the gap.
+The strong RAG control isolates the point: standard and even well-engineered retrieval recall un-superseded facts but cannot order a chain of corrections, because similarity ranking has no notion of sequence. The equal-token-budget control shows the win is not prompt length: matching the recency baseline's budget to Recall Lab's does not close the gap.
 
 Caveats that stay attached: one relocation scenario, four to five runs per control, no statistical test yet, and a single model family. This is not a general memory benchmark. The next steps are a long-context control, more scenarios, and the pre-registered 30-conversation protocol in `protocol.md`.
 

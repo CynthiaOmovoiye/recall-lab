@@ -28,3 +28,5 @@ Thumbs.db
 
 # Data
 data/
+# Agent tooling
+.claude/
