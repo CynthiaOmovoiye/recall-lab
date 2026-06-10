@@ -81,3 +81,11 @@ BRIEF_MAX_TOKENS = 2000  # cap on the consolidated brief size
 # Salience scoring
 SALIENCE_THRESHOLD = 0.5  # below this, exchange is not promoted to brief
 DECAY_HALF_LIFE_DAYS = 14  # used in Forgetting Curves Lab (secondary experiment)
+
+# Strong RAG control. The `strong_rag` agent uses turn-order recency. The
+# `strong_rag_dated` agent uses real date metadata: timestamp recency plus a
+# date-window filter (metadata filtering by date added). The window is how many
+# days of history survive the filter; older candidates are dropped before
+# reranking. Empty disables the hard filter, leaving timestamp recency only.
+_window = os.environ.get("RECALL_STRONG_RAG_RECENCY_WINDOW_DAYS", "1.5").strip()
+STRONG_RAG_RECENCY_WINDOW_DAYS = float(_window) if _window else None

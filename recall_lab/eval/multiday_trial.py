@@ -22,7 +22,10 @@ from typing import Any, Literal
 
 from recall_lab.agent import RecallAgent
 from recall_lab.consolidation.sleep import run_sleep_job
+from recall_lab.controls.episodic import EpisodicJudgeAgent
+from recall_lab.config import STRONG_RAG_RECENCY_WINDOW_DAYS
 from recall_lab.controls.sliding import SlidingWindowAgent
+from recall_lab.controls.strong_rag import StrongRAGAgent
 from recall_lab.controls.vector import VectorRetrievalAgent
 from recall_lab.eval.metrics import FailureMode, estimate_tokens, judge_answer
 from recall_lab.memory.brief import Brief
@@ -32,7 +35,9 @@ from recall_lab.memory.traces import MemoryTraceStore
 DEFAULT_SCENARIO = Path("scenarios/retail_memory_week.json")
 DEFAULT_OUT_DIR = Path("reports/retail_memory_week")
 DEFAULT_VECTOR_TOP_K = 5
-AgentChoice = Literal["sliding", "recall", "vector", "both", "all"]
+AgentChoice = Literal[
+    "sliding", "recall", "vector", "strong_rag", "strong_rag_dated", "episodic", "both", "all"
+]
 
 
 @dataclass
@@ -274,6 +279,172 @@ def run_vector_trial(
     return result
 
 
+def _parse_ts(value: Any) -> float | None:
+    """Parse an ISO date string from the scenario into epoch seconds, or None."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except ValueError:
+        return None
+
+
+def run_strong_rag_trial(
+    scenario: dict[str, Any],
+    days: list[dict[str, Any]],
+    judge_samples: int = 1,
+    verbose: bool = False,
+    top_k: int = DEFAULT_VECTOR_TOP_K,
+    candidate_k: int = 12,
+    recency_weight: float = 0.30,
+    recency_mode: str = "turn",
+    recency_window_days: float | None = None,
+    show_timestamps: bool = False,
+    chronological: bool = False,
+    agent_name: str = "strong_rag",
+) -> AgentTrialResult:
+    """Run the full scenario through an industry-standard RAG control.
+
+    Query rewriting, hybrid dense+BM25 retrieval fused with RRF, a recency boost,
+    and reranking, the stack a production team actually ships. It still has no
+    validity state, so this measures how far engineered retrieval gets on the
+    relocation chain before it hits the authority gap.
+
+    Two configurations share this runner. The default (`strong_rag`) uses
+    turn-order recency. The dated variant (`strong_rag_dated`) uses real date
+    metadata: timestamp recency plus a date-window filter, with the clock set per
+    day from the scenario dates. Comparing them shows whether metadata-by-date
+    filtering closes the chain gap or just relocates it.
+    """
+    agent = StrongRAGAgent(
+        top_k=top_k,
+        candidate_k=candidate_k,
+        recency_weight=recency_weight,
+        recency_mode=recency_mode,
+        recency_window_days=recency_window_days,
+        show_timestamps=show_timestamps,
+        chronological=chronological,
+    )
+    result = AgentTrialResult(agent_name=agent_name)
+
+    for day in days:
+        label = day.get("label", "day")
+        turns = day.get("turns", [])
+        agent.set_clock(_parse_ts(day.get("date")))
+        for i, user_turn in enumerate(turns, start=1):
+            if verbose:
+                print(f"[{agent_name}] {label}: turn {i}/{len(turns)}")
+            response = agent.respond(user_turn)
+            result.records.append(
+                AnswerRecord(
+                    phase="chat",
+                    day_label=label,
+                    turn_index=i,
+                    user=user_turn,
+                    agent=response,
+                    output_tokens_estimate=estimate_tokens(response),
+                    input_tokens_estimate=agent.last_input_tokens,
+                )
+            )
+
+    final_eval = scenario.get("final_eval", {})
+    eval_label = final_eval.get("label", "final_eval")
+    questions = final_eval.get("questions", [])
+    # The eval happens after the last day; stamp it at the final-eval date if the
+    # scenario gives one, else the last day's date, so "now" is the present.
+    eval_ts = _parse_ts(final_eval.get("date")) or (_parse_ts(days[-1].get("date")) if days else None)
+    agent.set_clock(eval_ts)
+    for i, item in enumerate(questions, start=1):
+        question = item["text"]
+        expected = item["expected"]
+        if verbose:
+            print(f"[{agent_name}] {eval_label}: question {i}/{len(questions)}")
+        response = agent.respond(question)
+        correct, mode, votes = score_answer(question, response, expected, judge_samples)
+        result.records.append(
+            AnswerRecord(
+                phase="final_eval",
+                day_label=eval_label,
+                turn_index=i,
+                user=question,
+                agent=response,
+                expected=expected,
+                failure_mode=mode.value,
+                correct=correct,
+                judge_votes=votes,
+                output_tokens_estimate=estimate_tokens(response),
+                input_tokens_estimate=agent.last_input_tokens,
+            )
+        )
+
+    return result
+
+
+def run_episodic_trial(
+    scenario: dict[str, Any],
+    days: list[dict[str, Any]],
+    judge_samples: int = 1,
+    verbose: bool = False,
+) -> AgentTrialResult:
+    """Run the full scenario through the raw episodic read-time-judge control.
+
+    Keeps every statement raw and injects the whole log each turn, then asks the
+    model to work out the current answer. No consolidation runs. This is the
+    "just keep everything" baseline from arxiv 2605.12978; the comparison of
+    interest is accuracy at a growing input-token cost versus the brief's flat
+    one.
+    """
+    agent = EpisodicJudgeAgent()
+    result = AgentTrialResult(agent_name="episodic_judge")
+
+    for day in days:
+        label = day.get("label", "day")
+        turns = day.get("turns", [])
+        for i, user_turn in enumerate(turns, start=1):
+            if verbose:
+                print(f"[episodic] {label}: turn {i}/{len(turns)}")
+            response = agent.respond(user_turn)
+            result.records.append(
+                AnswerRecord(
+                    phase="chat",
+                    day_label=label,
+                    turn_index=i,
+                    user=user_turn,
+                    agent=response,
+                    output_tokens_estimate=estimate_tokens(response),
+                    input_tokens_estimate=agent.last_input_tokens,
+                )
+            )
+
+    final_eval = scenario.get("final_eval", {})
+    eval_label = final_eval.get("label", "final_eval")
+    questions = final_eval.get("questions", [])
+    for i, item in enumerate(questions, start=1):
+        question = item["text"]
+        expected = item["expected"]
+        if verbose:
+            print(f"[episodic] {eval_label}: question {i}/{len(questions)}")
+        response = agent.respond(question)
+        correct, mode, votes = score_answer(question, response, expected, judge_samples)
+        result.records.append(
+            AnswerRecord(
+                phase="final_eval",
+                day_label=eval_label,
+                turn_index=i,
+                user=question,
+                agent=response,
+                expected=expected,
+                failure_mode=mode.value,
+                correct=correct,
+                judge_votes=votes,
+                output_tokens_estimate=estimate_tokens(response),
+                input_tokens_estimate=agent.last_input_tokens,
+            )
+        )
+
+    return result
+
+
 def run_recall_trial(
     scenario: dict[str, Any],
     days: list[dict[str, Any]],
@@ -478,6 +649,26 @@ def run_trial(
         results.append(
             run_vector_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
         )
+    if agents in {"strong_rag", "all"}:
+        results.append(
+            run_strong_rag_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
+        )
+    if agents in {"strong_rag_dated", "all"}:
+        results.append(
+            run_strong_rag_trial(
+                scenario,
+                days,
+                judge_samples=judge_samples,
+                verbose=verbose,
+                recency_mode="timestamp",
+                recency_window_days=STRONG_RAG_RECENCY_WINDOW_DAYS,
+                agent_name="strong_rag_dated",
+            )
+        )
+    if agents in {"episodic", "all"}:
+        results.append(
+            run_episodic_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
+        )
     if agents in {"recall", "both", "all"}:
         results.append(
             run_recall_trial(
@@ -497,9 +688,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument(
         "--agents",
-        choices=["sliding", "recall", "vector", "both", "all"],
+        choices=[
+            "sliding", "recall", "vector", "strong_rag", "strong_rag_dated",
+            "episodic", "both", "all",
+        ],
         default="both",
-        help="'both' is sliding+recall. 'all' adds the vector-retrieval control.",
+        help="'both' is sliding+recall. 'all' adds the vector, strong-RAG, "
+        "date-metadata strong-RAG, and raw-episodic controls.",
     )
     parser.add_argument("--max-days", type=int, default=None)
     parser.add_argument(

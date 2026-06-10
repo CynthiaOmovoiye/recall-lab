@@ -862,3 +862,196 @@ Judge audit: vector campaign 1 split verdict of 75 graded answers (run 1, the ve
 Headline table from here on cites pinned runs. The pinned numbers are: sliding 0.00, equal-budget recency 0.00, vector 0.40, Recall Lab 1.00, all on `relocation_chain`.
 
 Operational note. The reruns took several attempts. Session-bound background runs were killed by session interrupts, and one earlier batch lost runs to a transient APIConnectionError. The clean 5/5 came from running both campaigns directly in a terminal, sequentially. For the 30-conversation campaign, run it in a real terminal or a detached process, not a session-tied background job.
+
+---
+
+## May 31, 2026. Episodic read-time-judge baseline, and the paper that motivates it.
+
+Paper of note: "Useful Memories Become Faulty When Continuously Updated by LLMs" (arxiv 2605.12978). It tested repeated LLM rewriting of memory and found the memory degrades over time. Its winning recipe was to keep raw traces and decide the current answer at read time, which beat the rewriting approaches.
+
+This cuts toward Recall Lab's core premise, so it is worth confronting directly. The sleep job is a rewriting loop: it compresses, supersedes, and re-renders the brief each day, which is the pattern the paper punishes. The protection is that the raw episodic log is never discarded; the brief is derived and the SQLite trace store is ground truth. The paper's winning recipe is half of what the system already keeps.
+
+So built the control the paper implies: `recall_lab/controls/episodic.py`, the `EpisodicJudgeAgent`. Keep every statement verbatim, inject the whole log each turn, ask the model to work out the current answer at read time. No compression, no supersede, no consolidation. It implements the `.respond` protocol and reports `last_input_tokens` so the runner can chart its growing input bill against the brief's flat one.
+
+Wired into `multiday_trial.py` as `--agents episodic` (and folded into `all`) with `run_episodic_trial`, and into `variance.py`'s lineup. Tests in `tests/test_episodic_control.py` cover the raw-history plumbing offline: verbatim retention, oldest-first order, nothing dropped or compressed, and the API-key guard. 41 tests pass, ruff clean.
+
+What it answers. Does validity-state consolidation actually beat keeping everything raw? Two ways the brief can still win. Accuracy: if raw history confuses the model on a long correction chain, the brief's explicit Past section wins on correctness. Cost: even if raw ties on accuracy on the short relocation chain, it pays a growing input-token bill while the brief stays bounded. The crossover, where long logs make raw too expensive and consolidation starts to pay, is the Chapter 3 result.
+
+Next step. Run `--agents episodic` on the relocation chain under the pinned provider, alongside the existing controls, and chart accuracy and mean input tokens per turn. If raw beats the brief on accuracy here, the paper is right for this setup and the sleep job needs to justify itself on cost or on a longer scenario. Report either way before widening any claim. Not run yet; the runner and control are in place.
+
+Other papers from the same scan, logged for the trail: Memora: From Recall to Forgetting (arxiv 2604.20006), EvoMemBench (arxiv 2605.18421), Memory-Induced Tool-Drift in LLM Agents (arxiv 2605.24941).
+
+---
+
+## June 7, 2026. Strong RAG control built, and the Chapter 3 campaign pre-registered.
+
+The Chapter 3 claim is that retrieval misses authority. The risk is that it has only been tested against flat top-k vector search, which no serious team ships. Beating a strawman is not a result. So I built the strong end of retrieval as a control and pre-registered the predictions here before running, so the result cannot be reverse-fit to the chapter.
+
+### What was built
+
+`recall_lab/controls/strong_rag.py`, `StrongRAGAgent`. The industry-standard stack on the same `.respond` protocol as the other controls:
+
+- Query rewriting. The raw turn is rewritten into an explicit retrieval query, so "where do you ship today" becomes a query for the current shipping city.
+- Hybrid retrieval. Dense vector search (ChromaDB) and lexical search (BM25, with a token-overlap fallback) fused with Reciprocal Rank Fusion (k=60).
+- Recency boost. Each exchange carries a turn index; a tunable boost lifts newer exchanges of equal relevance. This is the heuristic that could let it prefer Berlin over Lagos without any validity state.
+- Reranking. The fused candidates are reranked before the top-k context is composed. LLM reranker by default, injectable for a cross-encoder.
+
+Still no validity state by design. Any win on the relocation chain comes from recency, any failure isolates the authority gap. Every external piece is injectable, so the fusion, recency, and rerank logic are covered by `tests/test_strong_rag.py` offline, 9 tests, no network or API key. Wired into `multiday_trial.py` and `variance.py` as `--agents strong_rag` and folded into `all`.
+
+### Pre-registered predictions (relocation_chain, pinned provider, 5 seeds)
+
+Written before the campaign runs. The point is to commit, then report against this, win or lose.
+
+1. Strong RAG clears the stable facts: favorite color and shellfish allergy at or near 5/5, same as flat vector.
+2. Strong RAG beats flat vector on the chain. Flat vector is 0/5 on current, previous, and first city (pinned v11). I expect the recency boost to recover the current city most runs, so current-city accuracy rises above zero.
+3. Strong RAG still fails the ordered chain. Previous-city and first-city stay low, because recency ranks by newness and the chain needs the order of supersession, which recency flattens. Mean on the three chain questions stays well below Recall Lab's 1.00.
+4. Raw episodic read-time judge ties or beats strong RAG on accuracy here, because the whole log fits and the model can reason over it, but pays a growing input-token bill that strong RAG and the brief do not.
+5. Recall Lab brief holds 1.00 on the chain at a bounded token cost.
+
+If prediction 3 is wrong and strong RAG also reaches 1.00 on the ordered chain, the validity claim narrows honestly: engineered retrieval is enough for this scenario, and the case for validity state moves to a harder scenario (an adversarial re-assertion of an old fact, or a longer chain). Report either way.
+
+### Next step
+
+Run `scripts/run_chapter3.sh` from the repo root on a real terminal. The key is read from `.env` by `config.py`, same as every campaign. It runs the full lineup (`--agents all`) plus the equal-budget control across 5 seeds, under the pinned provider, with the 3-call judge audit. Then fold the headline table into the Chapter 3 draft, replacing the "what I have not tested yet" section with numbers. Not run yet; the control, runner, and predictions are in place.
+
+---
+
+## June 7, 2026. v12 Chapter 3 results: strong RAG climbs the recent links and fails the oldest.
+
+Ran `scripts/run_chapter3.sh` on `relocation_chain`, 5 seeds per agent, pinned provider, 3-call judge audit. Zero split verdicts: 0 of 125 in the lineup, 0 of 50 in the equal-budget pass.
+
+Headline, mean recall accuracy and mean chat input tokens per turn over 5 runs:
+
+| Agent | Accuracy | Mean chat input tokens |
+| --- | --- | --- |
+| sliding_window_2 | 0.00 | 267 |
+| vector_topk_5 | 0.52 | 373 |
+| strong_rag | 0.76 | 479 |
+| episodic_judge | 1.00 | 974 |
+| recall_lab_brief_window_2 | 1.00 | 438 |
+| budgeted_window (equal-budget) | 0.08 | matched |
+
+Per-question, strong_rag: current city 4/5, previous city 5/5, first city 0/5, favorite color 5/5, shellfish 5/5.
+
+### Predictions vs results (against the June 7 pre-registration)
+
+1. Stable facts at or near 5/5: confirmed. Color and shellfish 5/5 for vector, strong RAG, episodic, and the brief.
+2. Strong RAG beats flat vector and recovers the current city: confirmed. 0.76 vs 0.52, current city 4/5 vs 0/5.
+3. Strong RAG still fails the ordered chain: half confirmed. It failed the first (oldest) city 0/5, as predicted, but it recovered the previous city 5/5, which I predicted would stay low. The failure is narrower and deeper than I guessed: recency recovers the recent links and collapses only on the oldest superseded fact.
+4. Episodic ties on accuracy at a higher, growing token cost: confirmed. 1.00 at 974 tokens/turn vs the brief's 1.00 at 438, and the episodic bill grows with the log.
+5. Recall Lab brief 1.00 at bounded cost: confirmed.
+
+### Reads
+
+- The "RAG misses authority" claim survives, sharpened. A full industry stack (query rewrite, hybrid, RRF, recency, rerank) recovers the recent end of a correction chain and fails the oldest link, because recency approximates authority near the present and decays into the past.
+- On this short chain, validity state does not beat raw retention on accuracy; both hit 1.00. The validity win here is cost: 438 vs 974 mean input tokens, and the gap widens with conversation length. This is the cost crossover the May 31 episodic entry called "the Chapter 3 result." An accuracy separation between brief and raw needs a longer or adversarial scenario, which is Chapter 4 and 5 work.
+- Claim 3 in research-claims.md (retrieval finds candidates, authority decides which is current) now has direct strong-RAG evidence and is a promotion candidate to `tested`, pending the public post landing. Promotion is Cynthia's call per that file's rule.
+
+Folded into Chapter 3 (`posts/chapters/03-rag-misses.md`, draft v2). The full per-question table and this scorecard are the spine of the follow-up lab note.
+
+---
+
+## June 7, 2026. v13 pre-registration: date-metadata filtering for strong RAG.
+
+Cynthia asked whether v12 strong RAG did metadata filtering by date added. It did not. v12 used a recency boost on insertion order, with no stored date and no filter. To close the "industry-standard RAG" claim against that exact objection, I added `strong_rag_dated`: real `added_at` timestamps stored as chunk metadata and sourced from the scenario dates (set per day via `set_clock`), timestamp-based recency, and an explicit metadata filter by date added (`recency_window_days`, default 1.5 days from config). It runs alongside the turn-order `strong_rag` in `--agents all`, so the v13 campaign produces both side by side.
+
+Predictions on relocation_chain, 5 seeds, pinned provider, written before the run:
+
+1. `strong_rag_dated` matches `strong_rag` on the stable facts: color and shellfish at or near 5/5.
+2. On the current city, dated is at least as good as turn-order. Both the date recency and the 1.5-day window favor the most recent fact.
+3. On the first (oldest) city, dated stays at or near 0/5, and the date filter can make the previous-city question worse than turn-order, because a 1.5-day window drops the two oldest cities before reranking. Metadata-by-date filtering helps the present and cannot recover a fact older than the window.
+4. Net: date-metadata filtering relocates the gap toward the present. It does not close it. The validity brief still holds 1.00 on the full chain.
+
+If `strong_rag_dated` reaches 1.00 on the ordered chain, the validity claim narrows to "needs a harder scenario" and I report it. Run with `scripts/run_chapter3.sh` (label v13, key from `.env`). Not run yet; the control, config knob, runner wiring, and predictions are in place, and the offline tests pass.
+
+---
+
+## June 7, 2026. v13 results: date-metadata filtering makes strong RAG worse, and deletes a stable fact.
+
+Ran the v13 campaign, then reran the lineup. The equal-budget pass completed 5/5 (brief 1.00, budgeted recency 0.00). The lineup pass completed 4 of 5 runs (run 5 dropped both times, likely an API blip mid-batch), so the numbers below are n=4. The spreads are near zero, so n=4 is reliable here; chasing the 5th run is optional.
+
+Mean recall accuracy and mean chat input tokens per turn (n=4):
+
+| Agent | Accuracy | Mean chat input tokens |
+| --- | --- | --- |
+| sliding_window_2 | 0.00 | 268 |
+| vector_topk_5 | 0.50 | 350 |
+| strong_rag (turn recency) | 0.80 | 473 |
+| strong_rag_dated (date-metadata filter) | 0.40 | 477 |
+| episodic_judge | 1.00 | 993 |
+| recall_lab_brief_window_2 | 1.00 | 444 |
+
+Per-question, strong_rag (turn recency): current city 4/4, previous city 4/4, first city 0/4, color 4/4, shellfish 4/4. It fails only the oldest link.
+
+Per-question, strong_rag_dated (date filter): current city 4/4, previous city 0/4, first city 0/4, color 4/4, shellfish allergy 0/4. It perfected the present and deleted every fact older than the window.
+
+Judge audit: 1 split of 120 graded answers (run 3 vector previous-city, majority correct). Stable.
+
+### Predictions vs results (against the June 7 v13 pre-registration)
+
+1. Dated matches the stable facts: WRONG, and this is the interesting miss. Color held at 2/2, but the shellfish allergy dropped to 0/2. The allergy was stated on day 1 and never changed, yet the 1.5-day date window filtered it out for being old. A hard date filter cannot distinguish "old but still true" from "old and superseded," so it deletes both.
+2. On the current city, dated is at least as good as turn-order: CONFIRMED. Dated hit 2/2, the only retrieval agent to nail the current shipping city every run. The filter is very good at the present.
+3. First city stays near 0 and previous-city can get worse: CONFIRMED and stronger. Previous city fell from strong_rag's 4/4 to 0/4 under the filter, and first city stayed 0/4.
+4. Net: date-metadata filtering relocates the gap toward the present, does not close it, and the validity brief still holds 1.00: CONFIRMED. Dated 0.40 < turn-recency strong_rag 0.80 < brief 1.00, and the brief does it at a lower token cost (444 vs the dated agent's 477 and episodic's 993).
+
+### Read
+
+The headline for the Jun 16 lab note: bolting the most-cited "industry standard" date filter onto strong RAG did not help, it dropped overall accuracy from 0.80 to 0.40. It bought a perfect current-city answer by deleting every fact older than the window, including a stable allergy that was always true. This is the cleanest demonstration in the lab so far that recency and date heuristics are proxies for authority, not authority. Authority has to know that a fact was superseded, not merely that it is old. That is what the validity brief encodes and what no retrieval filter can infer from a timestamp.
+
+This strengthens research-claims.md Claim 3 (retrieval finds candidates, authority decides which is current). It is now a strong promotion candidate to `tested`. Promotion is Cynthia's call.
+
+Next: the lineup is at n=4 with near-zero spread, enough to draft the Jun 16 lab note around the date-filter result. Chasing a clean n=5 is optional. Chapter 3 keeps its v12 5-seed numbers (strong_rag 0.76) and does not need the dated result; the dated finding belongs to the lab note.
+
+---
+
+## June 9, 2026. v14 pre-registration: fair RAG sweep, removing the knob-bias question.
+
+Cynthia raised the right methodological worry: the v12 strong-RAG result used recency_weight=0.30 and top_k=5, and the first-city miss was partly a coverage effect (only 5 snippets in context, recency pushed the oldest city out, the model abstained). So the per-question numbers could be an artifact of two choices. The fair sweep removes that question. New runner `recall_lab/eval/fair_rag_sweep.py`, run via `scripts/run_fair_rag.sh`.
+
+Added to `StrongRAGAgent`: `show_timestamps`, which prefixes each retrieved snippet with its real date so the model can reconstruct order if the information is in front of it. `run_strong_rag_trial` now passes recency_weight, top_k, candidate_k, and show_timestamps. Offline tests cover the timestamp rendering (16 tests pass).
+
+Sweep grid on relocation_chain: recency ablation rw=0.0 / 0.3 / 0.6 at top_k=5; top_k sweep k=5 / 10 / full at rw=0.3; fair shot at k=full with timestamps visible. Reference baselines (vector 0.52, episodic 1.00 ~974 tok, brief 1.00 ~438 tok) are cited from v12, not re-run.
+
+Predictions, written before the run:
+
+1. Recency ablation at k=5: the first city stays at or near 0 for rw=0.0, 0.3, and 0.6. Recency is not what causes the first-city failure; with only 5 snippets the oldest fact rarely makes the cut. If rw=0.0 recovers the first city, then recency was the cause and I report that.
+2. top_k sweep: as k grows, the oldest city gets retrieved more often, so first-city accuracy rises with k. The failure at small k is coverage, not an inability to read a retrieved fact.
+3. Fair shot (k=full + timestamps): the model sees every city with its date, so it should reconstruct the order and approach 1.00. This config is effectively the keep-everything agent with timestamps, so its mean chat input tokens should land near episodic's ~900 and well above the brief's ~438.
+4. Net honest read: RAG can order the chain only by carrying the whole history (high k), which costs unbounded tokens. Bounded-context RAG (small k) cannot, at any recency setting. The validity brief's value is bounded cost at full accuracy, not unique accuracy.
+
+If the fair shot does not reach ~1.00 even with everything visible and dated, that is a stronger result (the retrieval framing itself fails to order a chain) and I report it. Run with `RUNS=3 scripts/run_fair_rag.sh` first for cost, then 5 for final.
+
+### Addendum, June 9: 1-seed meter run + a fairness fix before the full cycle
+
+Ran a 1-seed meter pass ($0.11 for the 6 configs, so a 5-seed final is about $0.55 to $0.70). Read the traces before scaling. Three things:
+
+- Query rewrites are sane, so the pipeline is sound, not buggy.
+- The first city failed in every config at n=1, including kFULL and fair-shot, which is the de-bias signal: the failure is not an artifact of recency weight or top_k.
+- New and important: at full context (30+ snippets), the model gets distracted. On both the current and the first city it sometimes answers a different question entirely ("your favorite color is green") or returns the stale city (Berlin). So more retrieval did not help; it introduced lost-in-the-middle distraction. Lagos was present in context and the model still failed it.
+
+That exposed a fairness gap. The full-context configs presented snippets in relevance order, which scrambles chronology. A careful production system answering a temporal question would sort retrieved memory by time. So I added a `chronological` option and a 7th config, `strong_fairshot_chrono`: full context, timestamps visible, snippets ordered oldest-first. Prediction: if even time-ordered full context fails the first city, the result is bulletproof; if chronological ordering rescues it, the honest finding becomes "you must reconstruct order explicitly before answering," which is the same authority argument from the other side. `rank-bm25` is now a dependency, so the final run uses real BM25 hybrid retrieval, not the token-overlap fallback. 17 offline tests pass. Run the full cycle at `RUNS=5`.
+
+### v14 results, June 9 (5 seeds, real BM25; a couple of configs landed 4 runs)
+
+| Config | mean acc | first-city | mean chat tokens |
+| --- | --- | --- | --- |
+| strong_rw0.0_k5 | 0.60 | 0/5 | 440 |
+| strong_rw0.3_k5 | 0.68 | 0/5 | 429 |
+| strong_rw0.6_k5 | 0.75 | 0/4 | 406 |
+| strong_rw0.3_k10 | 0.80 | 0/4 | 628 |
+| strong_rw0.3_kFULL | 0.76 | 0/5 | 902 |
+| strong_fairshot (relevance order) | 0.80 | 0/5 | 969 |
+| strong_fairshot_chrono (time order) | 0.96 | 4/5 | 979 |
+
+Reference (v12): vector 0.52, episodic 1.00 ~974, validity brief 1.00 ~438.
+
+Predictions vs results:
+
+1. Recency ablation leaves first-city near 0 at every weight: CONFIRMED. 0/5, 0/5, 0/4. The failure is not a recency artifact.
+2. First-city accuracy rises with top_k: WRONG. kFULL stayed 0/5. At full context the fact is present and still missed, so it was never a coverage problem in the way I framed it.
+3. Fair-shot (full context, timestamps visible) approaches 1.00: WRONG for relevance order. It hit 0.80 and 0/5 on first-city. Visible dates were not enough.
+4. RAG orders the chain only by keeping the whole history: PARTIAL. Necessary but not sufficient. Keeping everything in relevance order still failed (fair-shot 0/5). Keeping everything in chronological order recovered it (fair-shot-chrono 4/5).
+
+The decisive variable is presentation order, the one I added after the meter run. Same retrieval, same timestamps; ordering the snippets oldest-first took first-city from 0/5 to 4/5 and overall 0.80 to 0.96. So the bottleneck is not retrieval quality, recency, context size, or even visible timestamps. It is that relevance ranking scrambles the chain, and the model does not reliably re-sort by date on its own. Chronological presentation fixes it, at keep-everything token cost (979 vs the brief's 438). The validity brief reaches the same accuracy at bounded cost because it stores the ordered lineage explicitly.
+
+This is the spine of the Jun 16 lab note and it strengthens Claim 3: retrieval finds candidates, and order/authority, not similarity, decides the chain. Chapter 3's v12 numbers (strong_rag 0.76, first 0) still hold for the realistic top_k=5 setting; the chapter does not need rewriting, but its mechanism line ("recency cannot reach the oldest fact") can be sharpened to "relevance ranking scrambles the order, and restoring it costs the whole history." Promotion of Claim 3 to `tested` is Cynthia's call.
