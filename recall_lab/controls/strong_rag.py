@@ -42,18 +42,10 @@ fakes and no API key.
 
 from __future__ import annotations
 
-import math
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-
-
-def _fmt_stamp(ex: "_Exchange") -> str:
-    """Human-readable recency tag for a snippet: a real date if known, else turn."""
-    if ex.added_at is not None:
-        return datetime.fromtimestamp(ex.added_at, tz=timezone.utc).strftime("%Y-%m-%d")
-    return f"turn {ex.turn}"
 
 from recall_lab.config import (
     AGENT_MODEL,
@@ -103,6 +95,13 @@ class _Exchange:
     text: str
     turn: int  # monotonic recency signal from insertion order; higher is newer
     added_at: float | None = None  # real timestamp (epoch seconds) when stored
+
+
+def _fmt_stamp(ex: _Exchange) -> str:
+    """Human-readable recency tag for a snippet: a real date if known, else turn."""
+    if ex.added_at is not None:
+        return datetime.fromtimestamp(ex.added_at, tz=timezone.utc).strftime("%Y-%m-%d")
+    return f"turn {ex.turn}"
 
 
 def _tokenize(text: str) -> list[str]:
