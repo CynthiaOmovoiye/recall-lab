@@ -1077,3 +1077,36 @@ Deferred to a separate job: the TTL-decay control (`controls/ttl.py`), the rule-
 Repo-hygiene note for the nudge routine: it keeps proposing an `experiments/` dir and a scoreboard that do not exist here, because it is reasoning from a generic template, not this repo. When acting on a nudge, translate its logic to `controls/` on `.respond` and ignore its file paths.
 
 Pre-existing lint debt, not from this change: `controls/strong_rag.py` trips ruff E402 (a helper defined above its imports, lines 45-64). Confirmed present on main with this branch's changes stashed. Left out of this PR to keep it scoped; worth a one-line cleanup PR.
+
+---
+
+## June 16, 2026. v15: deterministic resolver ties Recall Lab. The relocation chain no longer separates them.
+
+Ran the full lineup live under the pinned provider: `--agents all`, 5 runs, relocation chain, 3-call judge audit. The deterministic latest-value resolver was scored side by side with every existing control. Clean 5/5, 0 split verdicts of 175 graded answers.
+
+Mean recall accuracy:
+
+| Agent | mean | spread |
+| --- | --- | --- |
+| sliding_window_2 | 0.00 | flat |
+| strong_rag_dated | 0.40 | flat |
+| vector_topk_5 | 0.48 | 0.40-0.60 |
+| strong_rag | 0.76 | 0.60-0.80 |
+| episodic_judge | 1.00 | flat |
+| deterministic | 1.00 | flat |
+| recall_lab_brief_window_2 | 1.00 | flat |
+
+The headline: deterministic `max(timestamp)` matches Recall Lab at 1.00, all five questions 5/5, including the three chain questions that break every retrieval baseline. So is the raw episodic judge. On `relocation_chain`, three very different strategies tie at the ceiling: validity-state consolidation, keep-everything-and-read, and extract-then-latest-wins.
+
+What this means, stated honestly. The relocation chain does not justify validity-state consolidation over the two simpler baselines. A timestamp sort gets every question right here, because every change in this scenario is a clean, explicit, user-stated value update with an unambiguous attribute. That is exactly the case where "take the latest" is correct by construction. The scenario was built to expose retrieval's failure to order superseded facts, and it does that well (vector 0.48, strong_rag 0.76, both fail first-city). It was not built to separate validity reasoning from a timestamp sort, and it does not.
+
+This is a falsification-style result for the current scenario, and it is the right thing to surface, not bury. Recall Lab still wins the thing it was designed for against the baselines everyone actually ships (retrieval). It does not yet beat the two strongest non-retrieval baselines, because the test is too easy for them.
+
+What separates deterministic from validity state, by construction, and is therefore the next scenario:
+- A confirmation that is not a change. "Yes, still Berlin" adds a Berlin row; harmless for latest-wins. But "ignore my last message, keep the old address" has no representation in a timestamp sort: the latest statement is not the current value. Validity state can read that intent; max(timestamp) cannot.
+- An implicit correction with no clean value. "Actually that gift is for my brother, not my son" updates an attribute without restating it as attribute=value. The extractor may miss it; the contradiction classifier is built to catch it.
+- A re-assertion of an old fact. Mentioning Lagos again late, not as a move back but in passing, lifts its timestamp and can make a stale fact look current to max(timestamp). This is the interference case from the May 20 activation work, now at the resolver layer.
+
+Next step: build an adversarial scenario, `scenarios/correction_intent.json` or similar, carrying at least one confirmation-not-change, one implicit correction, and one stale re-assertion. Run the same lineup. The prediction: deterministic and episodic drop on those items, Recall Lab holds. If Recall Lab also drops, the validity mechanism has a real gap and the May 24 contradiction design needs revisiting. Either outcome is a Chapter 3 result. Not built yet.
+
+Token-cost note, still relevant even though accuracy ties. Episodic injects the whole log every turn; deterministic carries a compact resolved table; the brief is bounded. On this short chain the input-token gap is small, but it widens with conversation length, which is the cost half of the Chapter 3 argument. Worth charting on a longer scenario once the adversarial one exists.
