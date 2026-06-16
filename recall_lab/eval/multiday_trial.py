@@ -22,6 +22,7 @@ from typing import Any, Literal
 
 from recall_lab.agent import RecallAgent
 from recall_lab.consolidation.sleep import run_sleep_job
+from recall_lab.controls.deterministic import DeterministicResolverAgent
 from recall_lab.controls.episodic import EpisodicJudgeAgent
 from recall_lab.config import STRONG_RAG_RECENCY_WINDOW_DAYS
 from recall_lab.controls.sliding import SlidingWindowAgent
@@ -36,7 +37,8 @@ DEFAULT_SCENARIO = Path("scenarios/retail_memory_week.json")
 DEFAULT_OUT_DIR = Path("reports/retail_memory_week")
 DEFAULT_VECTOR_TOP_K = 5
 AgentChoice = Literal[
-    "sliding", "recall", "vector", "strong_rag", "strong_rag_dated", "episodic", "both", "all"
+    "sliding", "recall", "vector", "strong_rag", "strong_rag_dated", "episodic",
+    "deterministic", "both", "all",
 ]
 
 
@@ -445,6 +447,75 @@ def run_episodic_trial(
     return result
 
 
+def run_deterministic_trial(
+    scenario: dict[str, Any],
+    days: list[dict[str, Any]],
+    judge_samples: int = 1,
+    verbose: bool = False,
+) -> AgentTrialResult:
+    """Run the scenario through the deterministic latest-value resolver control.
+
+    Extracts (attribute, value) pairs from each user turn, stamps each with the
+    scenario date, and resolves the current value by max timestamp in Python.
+    No validity decision is made. This is the "why not just take the latest?"
+    baseline: if it matches Recall Lab on the relocation chain, validity state is
+    over-engineered for this scenario; where it breaks isolates what a validity
+    decision buys over a timestamp sort.
+    """
+    agent = DeterministicResolverAgent()
+    result = AgentTrialResult(agent_name="deterministic")
+
+    for day in days:
+        label = day.get("label", "day")
+        turns = day.get("turns", [])
+        agent.set_clock(_parse_ts(day.get("date")))
+        for i, user_turn in enumerate(turns, start=1):
+            if verbose:
+                print(f"[deterministic] {label}: turn {i}/{len(turns)}")
+            response = agent.respond(user_turn)
+            result.records.append(
+                AnswerRecord(
+                    phase="chat",
+                    day_label=label,
+                    turn_index=i,
+                    user=user_turn,
+                    agent=response,
+                    output_tokens_estimate=estimate_tokens(response),
+                    input_tokens_estimate=agent.last_input_tokens,
+                )
+            )
+
+    final_eval = scenario.get("final_eval", {})
+    eval_label = final_eval.get("label", "final_eval")
+    questions = final_eval.get("questions", [])
+    eval_ts = _parse_ts(final_eval.get("date")) or (_parse_ts(days[-1].get("date")) if days else None)
+    agent.set_clock(eval_ts)
+    for i, item in enumerate(questions, start=1):
+        question = item["text"]
+        expected = item["expected"]
+        if verbose:
+            print(f"[deterministic] {eval_label}: question {i}/{len(questions)}")
+        response = agent.respond(question)
+        correct, mode, votes = score_answer(question, response, expected, judge_samples)
+        result.records.append(
+            AnswerRecord(
+                phase="final_eval",
+                day_label=eval_label,
+                turn_index=i,
+                user=question,
+                agent=response,
+                expected=expected,
+                failure_mode=mode.value,
+                correct=correct,
+                judge_votes=votes,
+                output_tokens_estimate=estimate_tokens(response),
+                input_tokens_estimate=agent.last_input_tokens,
+            )
+        )
+
+    return result
+
+
 def run_recall_trial(
     scenario: dict[str, Any],
     days: list[dict[str, Any]],
@@ -669,6 +740,10 @@ def run_trial(
         results.append(
             run_episodic_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
         )
+    if agents in {"deterministic", "all"}:
+        results.append(
+            run_deterministic_trial(scenario, days, judge_samples=judge_samples, verbose=verbose)
+        )
     if agents in {"recall", "both", "all"}:
         results.append(
             run_recall_trial(
@@ -690,11 +765,11 @@ def parse_args() -> argparse.Namespace:
         "--agents",
         choices=[
             "sliding", "recall", "vector", "strong_rag", "strong_rag_dated",
-            "episodic", "both", "all",
+            "episodic", "deterministic", "both", "all",
         ],
         default="both",
         help="'both' is sliding+recall. 'all' adds the vector, strong-RAG, "
-        "date-metadata strong-RAG, and raw-episodic controls.",
+        "date-metadata strong-RAG, raw-episodic, and deterministic-resolver controls.",
     )
     parser.add_argument("--max-days", type=int, default=None)
     parser.add_argument(

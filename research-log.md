@@ -1055,3 +1055,25 @@ Predictions vs results:
 The decisive variable is presentation order, the one I added after the meter run. Same retrieval, same timestamps; ordering the snippets oldest-first took first-city from 0/5 to 4/5 and overall 0.80 to 0.96. So the bottleneck is not retrieval quality, recency, context size, or even visible timestamps. It is that relevance ranking scrambles the chain, and the model does not reliably re-sort by date on its own. Chronological presentation fixes it, at keep-everything token cost (979 vs the brief's 438). The validity brief reaches the same accuracy at bounded cost because it stores the ordered lineage explicitly.
 
 This is the spine of the Jun 16 lab note and it strengthens Claim 3: retrieval finds candidates, and order/authority, not similarity, decides the chain. Chapter 3's v12 numbers (strong_rag 0.76, first 0) still hold for the realistic top_k=5 setting; the chapter does not need rewriting, but its mechanism line ("recency cannot reach the oldest fact") can be sharpened to "relevance ranking scrambles the order, and restoring it costs the whole history." Promotion of Claim 3 to `tested` is Cynthia's call.
+
+---
+
+## June 16, 2026. Deterministic latest-value resolver control.
+
+A scheduled nudge (Jun 9 and Jun 16 runs) proposed two controls written against a repo layout this project never adopted: a `bench_correction_chain.py` scoreboard with `correction_cases.json`, and standalone files under `recall_lab/experiments/`. The real harness is `eval/multiday_trial.py` and `eval/variance.py` over `scenarios/relocation_chain.json`, with controls in `recall_lab/controls/` on the `.respond` protocol. So the ideas were sound; the scaffolding in the nudge was wrong. Translated the higher-value of the two to the real structure.
+
+Built `recall_lab/controls/deterministic.py`, the `DeterministicResolverAgent`. It answers the sharpest objection to validity-state consolidation: if the current answer is always the most recently stated value, why classify contradictions at all? Just take the latest.
+
+How it works. On each user turn an LLM extracts value-setting (attribute, value) pairs, reading the user turn only, matching the system's source boundary. Each pair is stored with its scenario timestamp (set per day via `set_clock`, same mechanism as `strong_rag`) and turn index. At answer time, for each attribute the winner is `max(added_at, turn)` in pure Python; no model decides what is current. The resolved table, current value plus prior values per attribute, is handed to the model only to phrase the answer.
+
+What it deliberately cannot do is the point. It has no notion of a confirmation versus a change: "yes, still Berlin" becomes another Berlin row (harmless), but an instruction like "keep the old one" has no representation, because there is no contradiction classifier to read intent. It keeps full per-attribute history so it can answer first/previous questions, but it orders that history by timestamp alone, never by a validity decision.
+
+Wired into `multiday_trial` (`--agents deterministic`, folded into `all`) via `run_deterministic_trial`, and into `variance.py`'s lineup. Tests in `tests/test_deterministic_control.py` cover the resolve logic offline with an injected extractor: max-timestamp wins, history preserved for past questions, attributes do not collide, turn breaks ties on same-day timestamps, the JSON-fence-tolerant parser, and the API-key guard. 67 tests pass.
+
+The Chapter 3 test it sets up. On the relocation chain, does `max(timestamp)` match Recall Lab? If yes, validity state is over-engineered for this scenario and the honest move is to say so. If it breaks, the break, an implicit correction with no clean value, a confirmation misread, an attribute the extractor splits wrong, is the argument for why a validity decision is not a timestamp sort. Not run yet; control and runner are in place.
+
+Deferred to a separate job: the TTL-decay control (`controls/ttl.py`), the rule-based forget-on-silence baseline. That is the cheap-forgetting alternative and maps to the decay item already in protocol.md Future work.
+
+Repo-hygiene note for the nudge routine: it keeps proposing an `experiments/` dir and a scoreboard that do not exist here, because it is reasoning from a generic template, not this repo. When acting on a nudge, translate its logic to `controls/` on `.respond` and ignore its file paths.
+
+Pre-existing lint debt, not from this change: `controls/strong_rag.py` trips ruff E402 (a helper defined above its imports, lines 45-64). Confirmed present on main with this branch's changes stashed. Left out of this PR to keep it scoped; worth a one-line cleanup PR.
