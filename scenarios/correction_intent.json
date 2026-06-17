@@ -1,0 +1,92 @@
+{
+  "name": "correction_intent",
+  "description": "An adversarial four-day trial built to separate validity-state reasoning from a max(timestamp) sort. The relocation chain ties deterministic, episodic, and Recall Lab at 1.00 because every change in it is a clean explicit value update, the exact case where take-the-latest is correct by construction. This scenario breaks that assumption on purpose. It carries a revert (a change that is cancelled without restating the prior value), a stale re-assertion (an old value mentioned in passing after it was superseded, the May 20 interference case at the resolver layer), and an implicit correction (a recipient changed by negation). The prediction: a timestamp sort mishandles the revert and the stale re-assertion, while validity-state consolidation holds. If Recall Lab also drops on these, its contradiction design has a real gap worth finding. Either outcome is a Chapter 3 result.",
+  "working_window": 2,
+  "customer_name": "Dele",
+  "agent_role": "personal shopping assistant",
+  "days": [
+    {
+      "label": "Jun 12 night",
+      "sleep_after": true,
+      "turns": [
+        "Hi, I'm Dele. Be my personal shopping assistant this week.",
+        "My favorite color is green.",
+        "My daughter is allergic to shellfish, so avoid shellfish in any food suggestions.",
+        "Ship my orders to Berlin.",
+        "I'm shopping for a birthday gift for my brother.",
+        "Thanks, I'll be back tomorrow."
+      ],
+      "date": "2026-06-12T23:00:00+00:00"
+    },
+    {
+      "label": "Jun 13",
+      "sleep_after": true,
+      "turns": [
+        "Change my favorite color to blue from now on.",
+        "For shipping, switch my address to Munich.",
+        "Wait, cancel that Munich change. Leave my shipping address exactly as it was before I said Munich.",
+        "Suggest a gift in my current favorite color.",
+        "Where will you ship it?",
+        "That helps, thank you."
+      ],
+      "date": "2026-06-13T11:00:00+00:00"
+    },
+    {
+      "label": "Jun 14",
+      "sleep_after": true,
+      "turns": [
+        "Honestly, green is still such a beautiful color, I always come back to it in my head.",
+        "But for what you pick me, use my current preference.",
+        "The birthday gift is not for my brother after all. It is for my father.",
+        "Compare two options you would actually buy.",
+        "Keep it short.",
+        "I might buy headphones next month."
+      ],
+      "date": "2026-06-14T11:00:00+00:00"
+    },
+    {
+      "label": "Jun 15",
+      "sleep_after": true,
+      "turns": [
+        "Keep my shellfish rule in place, that one has not changed.",
+        "Remind me which color you should be picking for me now.",
+        "My father prefers practical gifts.",
+        "What city are you shipping to right now?",
+        "Make the answer brief.",
+        "Thanks, I'll decide in the morning."
+      ],
+      "date": "2026-06-15T11:00:00+00:00"
+    }
+  ],
+  "final_eval": {
+    "label": "Jun 16 morning",
+    "questions": [
+      {
+        "text": "What color should you pick for me now?",
+        "expected": "blue",
+        "notes": "Stale re-assertion / interference. Color was changed green->blue on Jun 13. On Jun 14 the user fondly re-mentions green in passing ('green is still such a beautiful color') without changing the preference. A max(timestamp) resolver may extract (favorite color, green) from that late line and return green. Current truth is blue. Validity state should classify the passing mention as not a preference correction. Recall Lab may also fail here if the sleep job promotes the green mention; that is a real gap if so."
+      },
+      {
+        "text": "What city should you ship to right now?",
+        "expected": "Berlin",
+        "notes": "Revert. Shipping was Berlin, then switched to Munich, then the Munich change was cancelled without restating Berlin ('leave it exactly as it was before I said Munich'). A max(timestamp) resolver extracts (shipping, Munich) as the latest value-set, because the cancellation sets no value, and returns Munich. Current truth is Berlin. Validity state must read the cancellation as a revert. This is the hardest case and may break Recall Lab too."
+      },
+      {
+        "text": "Who is the birthday gift for?",
+        "expected": "father",
+        "notes": "Implicit correction by negation. Recipient was brother, corrected on Jun 14 to father ('not for my brother after all, it is for my father'). The value father is stated, so a timestamp sort should handle it; this is the milder discriminator and a near-control."
+      },
+      {
+        "text": "What food restriction should you remember for my daughter?",
+        "expected": "shellfish",
+        "notes": "Confirmation-that-is-not-a-change control. Set Jun 12, explicitly reaffirmed Jun 15 ('that one has not changed'). Every agent should pass. Confirms the scenario did not simply break everything."
+      },
+      {
+        "text": "What color did I originally tell you I liked, before I changed it?",
+        "expected": "green",
+        "notes": "History control. After the green->blue change, the original value must remain answerable as history. Episodic and validity state should pass; a latest-value resolver that keeps per-attribute history should also pass. Confirms the supersede preserves lineage."
+      }
+    ],
+    "date": "2026-06-16T08:00:00+00:00"
+  }
+}

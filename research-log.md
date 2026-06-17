@@ -1110,3 +1110,19 @@ What separates deterministic from validity state, by construction, and is theref
 Next step: build an adversarial scenario, `scenarios/correction_intent.json` or similar, carrying at least one confirmation-not-change, one implicit correction, and one stale re-assertion. Run the same lineup. The prediction: deterministic and episodic drop on those items, Recall Lab holds. If Recall Lab also drops, the validity mechanism has a real gap and the May 24 contradiction design needs revisiting. Either outcome is a Chapter 3 result. Not built yet.
 
 Token-cost note, still relevant even though accuracy ties. Episodic injects the whole log every turn; deterministic carries a compact resolved table; the brief is bounded. On this short chain the input-token gap is small, but it widens with conversation length, which is the cost half of the Chapter 3 argument. Worth charting on a longer scenario once the adversarial one exists.
+
+---
+
+## June 16, 2026. Adversarial scenario built and smoke-validated; full campaign pending credits.
+
+Built `scenarios/correction_intent.json`, the adversarial scenario the v15 entry called for. Same persona and four-day shape as the relocation chain, but three of its final-eval questions are designed to separate a validity decision from a max(timestamp) sort:
+
+- Stale re-assertion (expect blue): color is changed green to blue, then green is fondly re-mentioned in passing without changing the preference. A timestamp sort can lift the late green mention and return it.
+- Revert (expect Berlin): shipping is Berlin, switched to Munich, then the Munich change is cancelled without restating Berlin. The latest value-set is Munich, so a timestamp sort returns Munich.
+- Implicit correction by negation (expect father): the milder discriminator; the value is stated so a timestamp sort should handle it.
+
+Two controls: a confirmation-not-a-change (shellfish, explicitly reaffirmed) and a history question (original color before the change).
+
+Smoke validation, one deterministic run before credits ran out: deterministic scored 0.4, down from 1.0 on the relocation chain. It failed exactly the two predicted cases, returning green for the stale re-assertion and Munich for the revert, and passed father, shellfish, and inverted the history answer as a knock-on of the green mistake. So the scenario discriminates as designed: the timestamp sort that tied Recall Lab on the easy chain breaks here.
+
+The full seven-agent campaign (`--agents all`, 5 runs) did not complete: all runs failed with OpenRouter HTTP 402, out of credits. The open question stands until it runs: does Recall Lab hold on blue and Berlin where the timestamp sort breaks? If yes, this is the scenario that separates validity-state reasoning from recency. If Recall Lab also drops, the contradiction and supersede design has a real gap, most likely the sleep job promoting a passing mention (blue case) or failing to read a value-less cancellation as a revert (Berlin case). Rerun the full lineup once credits are topped up.
