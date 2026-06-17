@@ -24,7 +24,17 @@ from recall_lab.consolidation.contradiction import (
 from recall_lab.consolidation.judge import SalienceVerdict, score_exchange
 from recall_lab.memory.brief import Brief
 from recall_lab.memory.episodic import EpisodicLog, Exchange
+from recall_lab.memory.invariants import check_invariants
 from recall_lab.memory.traces import MemoryTraceStore
+
+
+class BriefInvariantError(RuntimeError):
+    """Raised when a consolidation pass leaves the trace set inconsistent.
+
+    Only raised when run_sleep_job is called with strict=True. By default a
+    violation is reported in the summary and warned about, not raised, so a
+    single bad pass cannot abort a whole campaign and lose the other runs.
+    """
 
 
 def _trace_from_verdict(exchange: Exchange, verdict: SalienceVerdict) -> MemoryTrace:
@@ -104,10 +114,19 @@ def run_sleep_job(
     brief: Brief,
     log: EpisodicLog,
     trace_store: MemoryTraceStore | None = None,
+    strict: bool = False,
 ) -> dict:
     """Run one consolidation pass over a single day's exchanges.
 
     Returns a summary dict suitable for appending to research-log.md.
+
+    After consolidation, the trace set is checked against the brief invariants
+    (active and past disjoint; no never_repeat item demoted without a
+    successor). Violations are always reported in the summary under
+    `invariant_violations` and warned to stdout. With strict=True a violation
+    raises BriefInvariantError instead, for tests and CI. The default is
+    non-strict so one bad pass cannot abort a whole variance campaign and lose
+    the other runs' data; the violation still shows up in the logged summary.
     """
     trace_store = trace_store or MemoryTraceStore()
     traces = trace_store.load()
@@ -151,6 +170,14 @@ def run_sleep_job(
     trace_store.save(traces)
     trace_store.render_brief(brief, now=day)
 
+    violations = check_invariants(traces)
+    if violations:
+        details = "; ".join(v.detail for v in violations)
+        message = f"brief invariant violation after {day.date()}: {details}"
+        if strict:
+            raise BriefInvariantError(message)
+        print(f"[sleep] WARNING {message}")
+
     return {
         "day": day.isoformat(),
         "exchanges": len(exchanges),
@@ -163,4 +190,7 @@ def run_sleep_job(
         "active_traces": len(trace_store.active()),
         "total_traces": len(trace_store.load()),
         "threshold": SALIENCE_THRESHOLD,
+        "invariant_violations": [
+            {"kind": v.kind, "detail": v.detail, "turn_ids": v.turn_ids} for v in violations
+        ],
     }

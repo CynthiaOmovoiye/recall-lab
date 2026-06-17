@@ -33,6 +33,7 @@ class SalienceVerdict:
     reason: str
     suggested_brief_section: str | None = None
     suggested_statement: str | None = None  # compressed semantic form
+    value_setting: bool = True  # did the turn set a current value, or just talk about one?
 
 
 VALID_SECTIONS = {
@@ -49,16 +50,31 @@ You see only what the user said. Score how important it is to remember
 long-term, and return JSON with these fields:
 - score: float in [0,1]. Higher = more important to remember long-term.
 - reason: one short sentence.
+- value_setting: true or false. See the rule below. Only a value-setting turn
+  may be filed as memory.
 - suggested_brief_section: one of stable_facts | active_intents | open_commitments
   | corrections | never_repeat | null.
 - suggested_statement: a single compressed semantic sentence to file under that
-  section. Use null if score < 0.5.
+  section. Use null if score < 0.5 or value_setting is false.
 
 The statement must come from what the user said in this turn. Do not file a fact
 the user did not state.
 
+value_setting rule. A turn is value_setting only if the user is setting or
+changing the current value of an attribute about themselves, now. A turn is NOT
+value_setting if the user is merely talking about, reminiscing over, or
+expressing a feeling toward a value without making it their current choice.
+- value_setting true: "My favorite color is blue." "Change my color to blue."
+  "Ship to Berlin." "I'm allergic to shellfish."
+- value_setting false: "Green is still such a beautiful color, I always come
+  back to it in my head." "I used to love green." "Blue reminds me of the sea."
+  These express sentiment about a value; they do not set the current value.
+When value_setting is false, set suggested_brief_section and suggested_statement
+to null even if the sentiment is strongly felt. A fond mention of an old value
+must never be filed as the current value.
+
 Score high when the user turn:
-- States a stable fact about the user
+- States or changes a stable fact about the user
 - Names an active intent or goal
 - Records a commitment
 - Corrects an earlier wrong statement
@@ -93,12 +109,34 @@ def _extract_json(text: str) -> dict[str, Any]:
     return parsed
 
 
+def _coerce_bool(value: Any, default: bool) -> bool:
+    """Read a bool from model JSON, tolerating a string like "false" or "no".
+
+    The field is missing on older payloads and may arrive as a string. Default
+    is applied only when the field is absent, so a present "false" wins.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"false", "no", "0", ""}
+    return bool(value)
+
+
 def _normalise_verdict(payload: dict[str, Any]) -> SalienceVerdict:
-    """Convert model JSON into a safe SalienceVerdict."""
+    """Convert model JSON into a safe SalienceVerdict.
+
+    Two gates block promotion (section and statement become null):
+    - score below 0.5, the original salience threshold.
+    - value_setting false, a turn that talks about a value without setting it.
+      Absent value_setting defaults to true so older payloads are unaffected.
+    """
     score = float(payload.get("score", 0.0))
     score = max(0.0, min(1.0, score))
 
     reason = str(payload.get("reason") or "No reason supplied.").strip()
+    value_setting = _coerce_bool(payload.get("value_setting"), default=True)
 
     section = payload.get("suggested_brief_section")
     if section not in VALID_SECTIONS:
@@ -108,7 +146,7 @@ def _normalise_verdict(payload: dict[str, Any]) -> SalienceVerdict:
     if statement is not None:
         statement = str(statement).strip() or None
 
-    if score < 0.5:
+    if score < 0.5 or not value_setting:
         section = None
         statement = None
 
@@ -117,6 +155,7 @@ def _normalise_verdict(payload: dict[str, Any]) -> SalienceVerdict:
         reason=reason,
         suggested_brief_section=section,
         suggested_statement=statement,
+        value_setting=value_setting,
     )
 
 

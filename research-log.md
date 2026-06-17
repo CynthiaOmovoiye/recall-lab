@@ -1055,3 +1055,160 @@ Predictions vs results:
 The decisive variable is presentation order, the one I added after the meter run. Same retrieval, same timestamps; ordering the snippets oldest-first took first-city from 0/5 to 4/5 and overall 0.80 to 0.96. So the bottleneck is not retrieval quality, recency, context size, or even visible timestamps. It is that relevance ranking scrambles the chain, and the model does not reliably re-sort by date on its own. Chronological presentation fixes it, at keep-everything token cost (979 vs the brief's 438). The validity brief reaches the same accuracy at bounded cost because it stores the ordered lineage explicitly.
 
 This is the spine of the Jun 16 lab note and it strengthens Claim 3: retrieval finds candidates, and order/authority, not similarity, decides the chain. Chapter 3's v12 numbers (strong_rag 0.76, first 0) still hold for the realistic top_k=5 setting; the chapter does not need rewriting, but its mechanism line ("recency cannot reach the oldest fact") can be sharpened to "relevance ranking scrambles the order, and restoring it costs the whole history." Promotion of Claim 3 to `tested` is Cynthia's call.
+
+---
+
+## June 16, 2026. Deterministic latest-value resolver control.
+
+A scheduled nudge (Jun 9 and Jun 16 runs) proposed two controls written against a repo layout this project never adopted: a `bench_correction_chain.py` scoreboard with `correction_cases.json`, and standalone files under `recall_lab/experiments/`. The real harness is `eval/multiday_trial.py` and `eval/variance.py` over `scenarios/relocation_chain.json`, with controls in `recall_lab/controls/` on the `.respond` protocol. So the ideas were sound; the scaffolding in the nudge was wrong. Translated the higher-value of the two to the real structure.
+
+Built `recall_lab/controls/deterministic.py`, the `DeterministicResolverAgent`. It answers the sharpest objection to validity-state consolidation: if the current answer is always the most recently stated value, why classify contradictions at all? Just take the latest.
+
+How it works. On each user turn an LLM extracts value-setting (attribute, value) pairs, reading the user turn only, matching the system's source boundary. Each pair is stored with its scenario timestamp (set per day via `set_clock`, same mechanism as `strong_rag`) and turn index. At answer time, for each attribute the winner is `max(added_at, turn)` in pure Python; no model decides what is current. The resolved table, current value plus prior values per attribute, is handed to the model only to phrase the answer.
+
+What it deliberately cannot do is the point. It has no notion of a confirmation versus a change: "yes, still Berlin" becomes another Berlin row (harmless), but an instruction like "keep the old one" has no representation, because there is no contradiction classifier to read intent. It keeps full per-attribute history so it can answer first/previous questions, but it orders that history by timestamp alone, never by a validity decision.
+
+Wired into `multiday_trial` (`--agents deterministic`, folded into `all`) via `run_deterministic_trial`, and into `variance.py`'s lineup. Tests in `tests/test_deterministic_control.py` cover the resolve logic offline with an injected extractor: max-timestamp wins, history preserved for past questions, attributes do not collide, turn breaks ties on same-day timestamps, the JSON-fence-tolerant parser, and the API-key guard. 67 tests pass.
+
+The Chapter 3 test it sets up. On the relocation chain, does `max(timestamp)` match Recall Lab? If yes, validity state is over-engineered for this scenario and the honest move is to say so. If it breaks, the break, an implicit correction with no clean value, a confirmation misread, an attribute the extractor splits wrong, is the argument for why a validity decision is not a timestamp sort. Not run yet; control and runner are in place.
+
+Deferred to a separate job: the TTL-decay control (`controls/ttl.py`), the rule-based forget-on-silence baseline. That is the cheap-forgetting alternative and maps to the decay item already in protocol.md Future work.
+
+Repo-hygiene note for the nudge routine: it keeps proposing an `experiments/` dir and a scoreboard that do not exist here, because it is reasoning from a generic template, not this repo. When acting on a nudge, translate its logic to `controls/` on `.respond` and ignore its file paths.
+
+Pre-existing lint debt, not from this change: `controls/strong_rag.py` trips ruff E402 (a helper defined above its imports, lines 45-64). Confirmed present on main with this branch's changes stashed. Left out of this PR to keep it scoped; worth a one-line cleanup PR.
+
+---
+
+## June 16, 2026. v15: deterministic resolver ties Recall Lab. The relocation chain no longer separates them.
+
+Ran the full lineup live under the pinned provider: `--agents all`, 5 runs, relocation chain, 3-call judge audit. The deterministic latest-value resolver was scored side by side with every existing control. Clean 5/5, 0 split verdicts of 175 graded answers.
+
+Mean recall accuracy:
+
+| Agent | mean | spread |
+| --- | --- | --- |
+| sliding_window_2 | 0.00 | flat |
+| strong_rag_dated | 0.40 | flat |
+| vector_topk_5 | 0.48 | 0.40-0.60 |
+| strong_rag | 0.76 | 0.60-0.80 |
+| episodic_judge | 1.00 | flat |
+| deterministic | 1.00 | flat |
+| recall_lab_brief_window_2 | 1.00 | flat |
+
+The headline: deterministic `max(timestamp)` matches Recall Lab at 1.00, all five questions 5/5, including the three chain questions that break every retrieval baseline. So is the raw episodic judge. On `relocation_chain`, three very different strategies tie at the ceiling: validity-state consolidation, keep-everything-and-read, and extract-then-latest-wins.
+
+What this means, stated honestly. The relocation chain does not justify validity-state consolidation over the two simpler baselines. A timestamp sort gets every question right here, because every change in this scenario is a clean, explicit, user-stated value update with an unambiguous attribute. That is exactly the case where "take the latest" is correct by construction. The scenario was built to expose retrieval's failure to order superseded facts, and it does that well (vector 0.48, strong_rag 0.76, both fail first-city). It was not built to separate validity reasoning from a timestamp sort, and it does not.
+
+This is a falsification-style result for the current scenario, and it is the right thing to surface, not bury. Recall Lab still wins the thing it was designed for against the baselines everyone actually ships (retrieval). It does not yet beat the two strongest non-retrieval baselines, because the test is too easy for them.
+
+What separates deterministic from validity state, by construction, and is therefore the next scenario:
+- A confirmation that is not a change. "Yes, still Berlin" adds a Berlin row; harmless for latest-wins. But "ignore my last message, keep the old address" has no representation in a timestamp sort: the latest statement is not the current value. Validity state can read that intent; max(timestamp) cannot.
+- An implicit correction with no clean value. "Actually that gift is for my brother, not my son" updates an attribute without restating it as attribute=value. The extractor may miss it; the contradiction classifier is built to catch it.
+- A re-assertion of an old fact. Mentioning Lagos again late, not as a move back but in passing, lifts its timestamp and can make a stale fact look current to max(timestamp). This is the interference case from the May 20 activation work, now at the resolver layer.
+
+Next step: build an adversarial scenario, `scenarios/correction_intent.json` or similar, carrying at least one confirmation-not-change, one implicit correction, and one stale re-assertion. Run the same lineup. The prediction: deterministic and episodic drop on those items, Recall Lab holds. If Recall Lab also drops, the validity mechanism has a real gap and the May 24 contradiction design needs revisiting. Either outcome is a Chapter 3 result. Not built yet.
+
+Token-cost note, still relevant even though accuracy ties. Episodic injects the whole log every turn; deterministic carries a compact resolved table; the brief is bounded. On this short chain the input-token gap is small, but it widens with conversation length, which is the cost half of the Chapter 3 argument. Worth charting on a longer scenario once the adversarial one exists.
+
+---
+
+## June 16, 2026. Adversarial scenario built and smoke-validated; full campaign pending credits.
+
+Built `scenarios/correction_intent.json`, the adversarial scenario the v15 entry called for. Same persona and four-day shape as the relocation chain, but three of its final-eval questions are designed to separate a validity decision from a max(timestamp) sort:
+
+- Stale re-assertion (expect blue): color is changed green to blue, then green is fondly re-mentioned in passing without changing the preference. A timestamp sort can lift the late green mention and return it.
+- Revert (expect Berlin): shipping is Berlin, switched to Munich, then the Munich change is cancelled without restating Berlin. The latest value-set is Munich, so a timestamp sort returns Munich.
+- Implicit correction by negation (expect father): the milder discriminator; the value is stated so a timestamp sort should handle it.
+
+Two controls: a confirmation-not-a-change (shellfish, explicitly reaffirmed) and a history question (original color before the change).
+
+Smoke validation, one deterministic run before credits ran out: deterministic scored 0.4, down from 1.0 on the relocation chain. It failed exactly the two predicted cases, returning green for the stale re-assertion and Munich for the revert, and passed father, shellfish, and inverted the history answer as a knock-on of the green mistake. So the scenario discriminates as designed: the timestamp sort that tied Recall Lab on the easy chain breaks here.
+
+The full seven-agent campaign (`--agents all`, 5 runs) did not complete: all runs failed with OpenRouter HTTP 402, out of credits. The open question stands until it runs: does Recall Lab hold on blue and Berlin where the timestamp sort breaks? If yes, this is the scenario that separates validity-state reasoning from recency. If Recall Lab also drops, the contradiction and supersede design has a real gap, most likely the sleep job promoting a passing mention (blue case) or failing to read a value-less cancellation as a revert (Berlin case). Rerun the full lineup once credits are topped up.
+
+---
+
+## June 17, 2026. v16 adversarial result: the revert is handled, the stale re-assertion is not. A real bug found.
+
+Ran the full lineup on `correction_intent` under the pinned provider: `--agents all`, 5 runs, 3-call judge audit. 1 split verdict of 175 (a sliding-window control answer, immaterial).
+
+Mean recall accuracy:
+
+| Agent | mean | spread |
+| --- | --- | --- |
+| sliding_window_2 | 0.20 | flat |
+| strong_rag_dated | 0.24 | 0.00-0.40 |
+| deterministic | 0.40 | flat |
+| recall_lab_brief_window_2 | 0.64 | 0.60-0.80 |
+| vector_topk_5 | 0.72 | 0.60-0.80 |
+| strong_rag | 0.80 | flat |
+| episodic_judge | 0.92 | 0.80-1.00 |
+
+This is not the predicted clean win, and the honest read is more useful than the prediction would have been.
+
+Per question, the two discriminators split:
+
+Revert (expect Berlin, "cancel the Munich change, leave it as before"):
+- recall_lab 5/5. It read the value-less cancellation as a revert and kept Berlin current.
+- deterministic 0/5, episodic 3/5, every retrieval baseline 0/5. max(timestamp) returned Munich as predicted; retrieval cannot represent a cancellation at all.
+- This is the case validity state was supposed to win, and it did, cleanly, where everything else failed.
+
+Stale re-assertion (expect blue, color changed green->blue then green re-mentioned in passing):
+- recall_lab 0/5. It failed, and worse than a timestamp sort fails it. Inspecting the brief: the sleep job promoted the Jun 14 passing mention of green and the contradiction classifier labelled it a CORRECTION, so green was made active again and blue was demoted to "Past step 3". The lineage is inverted: active says green, past says blue, exactly backwards. Consistent across all five runs.
+- deterministic 0/5 (returned green from the late mention), episodic 5/5, strong_rag 5/5.
+- So the scenario's interference case defeats Recall Lab through its own consolidation path. This is the May 20 interference failure and the v8 self-poisoning failure resurfacing at the contradiction layer: a passing re-mention is not a correction, but the classifier read it as one.
+
+Net: Recall Lab is the only agent that handled the revert, and one of several that failed the stale re-assertion, in its case via a wrong CORRECT classification rather than a timestamp artifact. episodic (0.92) and strong_rag (0.80) score higher overall here because they pass the stable/history questions and the re-assertion without a consolidation step that can mis-promote.
+
+What this means for the thesis. The relocation chain showed validity state was not needed (everything tied at 1.0). This scenario shows validity state both helps and hurts: it uniquely solves the revert, and it introduces a failure the simpler agents do not have, because consolidation can promote the wrong thing. That is a sharper, more honest Chapter 3 than "the brief wins": authority handling is real and necessary for reverts, and the salience-to-correction path needs a guard against treating a passing re-mention as a correction.
+
+The bug, precisely. In `consolidation/`, a Jun 14 user line that fondly re-mentions an old value ("green is still such a beautiful color, I always come back to it") is (a) promoted by the salience judge and (b) classified CORRECT against the current blue trace, superseding it. Fix direction: the contradiction classifier, or a guard before it, must distinguish a value-setting statement from a sentiment/reminiscence mention. A re-mention that does not assign the attribute as the current value should be UNRELATED, not CORRECT. This is a classifier-intent problem, the same shape as the user-only salience fix: the system must read whether the user is setting a value or just talking about one.
+
+Next step: write a failing test that reproduces the green-re-mention -> wrong CORRECT classification at the `consolidation/contradiction.py` level (offline, deterministic), then fix the classifier prompt or add a value-setting guard, then rerun v16 and confirm recall_lab recovers the blue case without losing the revert. Do not widen any claim until that holds.
+
+---
+
+## June 17, 2026. Trace analysis of the v15+v16 campaigns (Langfuse export). Two real findings, one false alarm caught.
+
+Imported the Langfuse traces/observations for every model call in the v15 and v16 campaigns (5797 calls, 2026-06-16..17) and analysed them. Hard numbers are exact from the observation records; qualitative findings were produced by a multi-agent pass and then re-verified by hand against the raw export before being trusted.
+
+Cost and instrumentation (exact):
+- 5797 calls, $3.35 total. The judge (anthropic/claude-sonnet-4.6, 2166 calls) is $3.08, 92% of spend. The agent (openai/gpt-4o-mini, 3631 calls) is $0.27. Eval cost, not agent volume, dominates, and it scales with campaign size. Before the 30-conversation campaign, tier the judge (cheap-first, escalate to Sonnet only on disagreement) or the bill grows fast.
+- Latency healthy: mean 1.43s, p95 2.97s, one 20.2s outlier. The only 5 ERROR records are the HTTP 402 out-of-credits from the killed v16 first attempt. Nothing else hiding.
+- The Langfuse auto-eval fields (faithfulness, groundedness, completeness, usefulness, technical_depth, context_precision, format_quality, quality_gate_attempt_*) are in the schema but 0 of 5797 are populated. Either the judge structured output is dropped on write or never requested. We are advertising evaluation coverage we do not have; fix before relying on it for regression gating.
+
+Finding that refines the v16 bug (verified against raw traces):
+- The blue stale-re-assertion failure is two-layer, not a classifier-only bug. I had logged it as "the contradiction classifier labelled it CORRECT". The traces show the failure starts one layer up. The salience judge scored the reminiscence line "green is still such a beautiful color, I always come back to it in my head" at 0.55 with the reason "User expresses a stable aesthetic preference for the color green", and promoted it as a preference. The contradiction classifier then received "favorite color is green" against active "blue" and returned CORRECT with reason "the new statement says the favorite color is green, contradicting the old fact that it was blue". Given that input, CORRECT is locally right. So the root cause is salience promoting a sentiment as a value-setting preference; the classifier mislabel is downstream of that. The fix from the June 17 spawned task still applies but the primary target moves upstream: salience must not promote a reminiscence as a value. A classifier-prompt guard is the secondary defence, not the fix.
+- Verified true and useful: extractor attribute naming is stable ("shipping city" used identically across the Berlin and Munich turns, 3/3), so the deterministic 0.40 is not an attribute-splitting artifact. Do not spend effort there.
+
+False alarm, caught and discarded:
+- The multi-agent pass claimed the shellfish Never-Repeat rule was silently demoted to the Past section (a new safety bug). Direct check of all 300 recall-agent briefs in the export: 207 have shellfish correctly in "Things to never repeat", 0 have it demoted to Past. The 5 apparent hits were the prompt's own instructions mentioning the Past section, not the brief body. The claim came from one agent misreading section boundaries in a 30-record slice and generalising. Recorded so the claim does not resurface: shellfish Never-Repeat held across the whole campaign. This is why surprising agent claims get checked against the full data before they enter the log.
+
+Net: no published number changes. The one writeup refinement is the blue-case framing, from "classifier mislabel" to "salience promoted a reminiscence as a preference, surfaced as a classifier CORRECT". Cost tiering and the dead auto-evaluators are the two cheap instrumentation actions before scaling up.
+
+---
+
+## June 17, 2026. v16 post-fix: the salience guard works. Recall Lab is the only agent at 1.00 on the adversarial scenario.
+
+Reran the full lineup on `correction_intent` after the salience value_setting guard, the classifier reminiscence guard, and the invariant linter (commit cf71db1). `--agents all`, 5 runs, pinned provider, 3-call judge audit. 0 split verdicts of 175.
+
+Recall Lab, per question, pre-fix -> post-fix:
+- blue (stale re-assertion): 0/5 -> 5/5. Fixed.
+- Berlin (revert): 5/5 -> 5/5. Held. The fix did not cost the revert.
+- father (implicit correction): 5/5 -> 5/5.
+- shellfish (confirmation control): 5/5 -> 5/5.
+- green-as-history: 1/5 -> 5/5. Recovered as a consequence: once the passing green reminiscence stopped being promoted as the current preference, the active/past lineage stopped inverting, so the history question reads correctly too.
+
+Mean recall accuracy, post-fix: sliding 0.20, strong_rag_dated 0.36, deterministic 0.40, vector 0.68, strong_rag 0.72, episodic 0.92, recall_lab 1.00.
+
+This is the result the adversarial scenario was built to produce. Recall Lab is now the only agent at 1.00, and it got there by handling the two cases that defeat a timestamp sort: the revert (a cancellation that sets no value, deterministic 0/5) and the stale re-assertion (a fond mention that sets no value, deterministic 0/5). Both are the same underlying principle the lab keeps returning to: a statement only changes memory if it sets a value, and authority is about intent, not recency. The fix encoded that at the salience layer, where the v16 trace analysis showed the failure actually began.
+
+What changed and why it is the right fix, not a scenario-specific patch:
+- The guard is a general rule (value-setting vs sentiment), not a hard-coded green/blue case. It blocks any reminiscence from being filed as a current value.
+- The Berlin revert held, so the guard did not over-suppress real changes.
+- The deterministic and episodic baselines were unchanged by the fix (0.40 and 0.92), confirming the scenario did not get easier; Recall Lab moved.
+
+The deterministic 0.40 and episodic 0.92 are the standing comparison. Deterministic still fails both discriminators because max(timestamp) cannot represent a value-less cancellation or tell a reminiscence from a value-set. Episodic passes the re-assertion and history but still drops the revert 2/5, because reading the whole raw log does not force a single authority decision. Only the validity brief gets both, every run.
+
+Next: this is now a clean two-scenario story. relocation_chain shows validity state is not needed when every change is an explicit value-set (everything ties at 1.00). correction_intent shows it is needed and sufficient when changes are adversarial (only recall_lab holds at 1.00). That pair is the Chapter 3 result. README headline updated. The brief-invariant linter (memory/invariants.py) is in place but not yet wired into the sleep job as a runtime assertion; wiring it to fail loudly on a violation during consolidation is a small follow-up.

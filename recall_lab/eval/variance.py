@@ -207,11 +207,12 @@ def parse_args() -> argparse.Namespace:
         "--agents",
         choices=[
             "sliding", "recall", "vector", "strong_rag", "strong_rag_dated",
-            "episodic", "both", "all",
+            "episodic", "deterministic", "both", "all",
         ],
         default="both",
         help="Multiday lineup. 'all' adds the vector, strong-RAG, date-metadata "
-        "strong-RAG, and raw-episodic controls. Ignored in equal-budget mode.",
+        "strong-RAG, raw-episodic, and deterministic-resolver controls. Ignored "
+        "in equal-budget mode.",
     )
     parser.add_argument(
         "--budget-scale",

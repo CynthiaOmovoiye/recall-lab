@@ -93,6 +93,12 @@ The conflict can be implicit. The new statement does not have to say the old
 one is wrong. If the new statement makes the old fact no longer true, that is
 CORRECT.
 
+But a new statement only CORRECTs an old fact if it actually sets a new current
+value. A statement that merely reminisces about, or expresses a feeling toward,
+a value is not a correction. "Green is still such a beautiful color, I always
+come back to it" does not change a current favorite of blue; that is UNRELATED,
+not CORRECT. Sentiment about a value is not a change to it.
+
 Return JSON only:
 {{"label": "CONFIRM|CORRECT|UNRELATED", "reason": "one short sentence"}}
 """
