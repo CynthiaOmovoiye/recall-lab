@@ -1126,3 +1126,43 @@ Two controls: a confirmation-not-a-change (shellfish, explicitly reaffirmed) and
 Smoke validation, one deterministic run before credits ran out: deterministic scored 0.4, down from 1.0 on the relocation chain. It failed exactly the two predicted cases, returning green for the stale re-assertion and Munich for the revert, and passed father, shellfish, and inverted the history answer as a knock-on of the green mistake. So the scenario discriminates as designed: the timestamp sort that tied Recall Lab on the easy chain breaks here.
 
 The full seven-agent campaign (`--agents all`, 5 runs) did not complete: all runs failed with OpenRouter HTTP 402, out of credits. The open question stands until it runs: does Recall Lab hold on blue and Berlin where the timestamp sort breaks? If yes, this is the scenario that separates validity-state reasoning from recency. If Recall Lab also drops, the contradiction and supersede design has a real gap, most likely the sleep job promoting a passing mention (blue case) or failing to read a value-less cancellation as a revert (Berlin case). Rerun the full lineup once credits are topped up.
+
+---
+
+## June 17, 2026. v16 adversarial result: the revert is handled, the stale re-assertion is not. A real bug found.
+
+Ran the full lineup on `correction_intent` under the pinned provider: `--agents all`, 5 runs, 3-call judge audit. 1 split verdict of 175 (a sliding-window control answer, immaterial).
+
+Mean recall accuracy:
+
+| Agent | mean | spread |
+| --- | --- | --- |
+| sliding_window_2 | 0.20 | flat |
+| strong_rag_dated | 0.24 | 0.00-0.40 |
+| deterministic | 0.40 | flat |
+| recall_lab_brief_window_2 | 0.64 | 0.60-0.80 |
+| vector_topk_5 | 0.72 | 0.60-0.80 |
+| strong_rag | 0.80 | flat |
+| episodic_judge | 0.92 | 0.80-1.00 |
+
+This is not the predicted clean win, and the honest read is more useful than the prediction would have been.
+
+Per question, the two discriminators split:
+
+Revert (expect Berlin, "cancel the Munich change, leave it as before"):
+- recall_lab 5/5. It read the value-less cancellation as a revert and kept Berlin current.
+- deterministic 0/5, episodic 3/5, every retrieval baseline 0/5. max(timestamp) returned Munich as predicted; retrieval cannot represent a cancellation at all.
+- This is the case validity state was supposed to win, and it did, cleanly, where everything else failed.
+
+Stale re-assertion (expect blue, color changed green->blue then green re-mentioned in passing):
+- recall_lab 0/5. It failed, and worse than a timestamp sort fails it. Inspecting the brief: the sleep job promoted the Jun 14 passing mention of green and the contradiction classifier labelled it a CORRECTION, so green was made active again and blue was demoted to "Past step 3". The lineage is inverted: active says green, past says blue, exactly backwards. Consistent across all five runs.
+- deterministic 0/5 (returned green from the late mention), episodic 5/5, strong_rag 5/5.
+- So the scenario's interference case defeats Recall Lab through its own consolidation path. This is the May 20 interference failure and the v8 self-poisoning failure resurfacing at the contradiction layer: a passing re-mention is not a correction, but the classifier read it as one.
+
+Net: Recall Lab is the only agent that handled the revert, and one of several that failed the stale re-assertion, in its case via a wrong CORRECT classification rather than a timestamp artifact. episodic (0.92) and strong_rag (0.80) score higher overall here because they pass the stable/history questions and the re-assertion without a consolidation step that can mis-promote.
+
+What this means for the thesis. The relocation chain showed validity state was not needed (everything tied at 1.0). This scenario shows validity state both helps and hurts: it uniquely solves the revert, and it introduces a failure the simpler agents do not have, because consolidation can promote the wrong thing. That is a sharper, more honest Chapter 3 than "the brief wins": authority handling is real and necessary for reverts, and the salience-to-correction path needs a guard against treating a passing re-mention as a correction.
+
+The bug, precisely. In `consolidation/`, a Jun 14 user line that fondly re-mentions an old value ("green is still such a beautiful color, I always come back to it") is (a) promoted by the salience judge and (b) classified CORRECT against the current blue trace, superseding it. Fix direction: the contradiction classifier, or a guard before it, must distinguish a value-setting statement from a sentiment/reminiscence mention. A re-mention that does not assign the attribute as the current value should be UNRELATED, not CORRECT. This is a classifier-intent problem, the same shape as the user-only salience fix: the system must read whether the user is setting a value or just talking about one.
+
+Next step: write a failing test that reproduces the green-re-mention -> wrong CORRECT classification at the `consolidation/contradiction.py` level (offline, deterministic), then fix the classifier prompt or add a value-setting guard, then rerun v16 and confirm recall_lab recovers the blue case without losing the revert. Do not widen any claim until that holds.
