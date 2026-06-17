@@ -100,7 +100,9 @@ The two-turn window makes the mechanism visible but is not a fair benchmark. The
 
 On the relocation chain under a pinned provider, the headline numbers are sliding window `0.00`, flat vector `~0.48`, strong RAG `0.76`, raw episodic `1.00`, deterministic latest-value resolver `1.00`, and Recall Lab's validity brief `1.00`. Strong RAG recovered the recent links of the chain and missed the first city every run. A fair sweep (`eval/fair_rag_sweep.py`) then varied the recency weight and top_k and handed the model the whole conversation with timestamps visible: the first city still failed under relevance ordering, and only reordering the same context chronologically recovered it (`4/5`). The fix was order of presentation, not retrieval quality.
 
-Recall Lab clears every retrieval baseline. It does not yet separate from the two strongest non-retrieval baselines on this scenario: a raw read-everything judge and a deterministic `max(timestamp)` resolver also score `1.00`. That is honest and expected. Every change in the relocation chain is a clean, explicit, user-stated value update, which is exactly the case where "take the latest" is correct by construction. The chain isolates retrieval's failure to order superseded facts; it does not separate a validity decision from a timestamp sort. The next scenario is adversarial by design (a confirmation that is not a change, an implicit correction, a stale re-assertion), where a timestamp sort should break and validity state should hold. See the status section and `reports/` for the per-question breakdowns.
+On the relocation chain, Recall Lab clears every retrieval baseline but does not separate from the two strongest non-retrieval baselines: a raw read-everything judge and a deterministic `max(timestamp)` resolver also score `1.00`. That is honest and expected. Every change in that chain is a clean, explicit, user-stated value update, exactly the case where "take the latest" is correct by construction. The chain isolates retrieval's failure to order superseded facts; it does not separate a validity decision from a timestamp sort.
+
+The `correction_intent` scenario is adversarial by design and does separate them. It carries a revert (a change cancelled without restating the prior value), a stale re-assertion (an old value fondly re-mentioned in passing after it was superseded), and an implicit correction. Post-fix means across five pinned runs: sliding `0.20`, deterministic `0.40`, strong RAG `0.72`, raw episodic `0.92`, and Recall Lab's validity brief `1.00`. Recall Lab is the only agent at `1.00`; it is the only one that handles both the revert (deterministic `0/5`, a value-less cancellation a timestamp sort cannot represent) and the stale re-assertion (deterministic `0/5`, a sentiment a timestamp sort reads as a value-set). Reaching `1.00` required a fix: trace analysis showed the salience judge was promoting a fond re-mention as a current preference, so the judge now distinguishes a value-setting statement from sentiment about a value. The two scenarios together are the result: validity state is not needed when every change is an explicit value-set, and it is both needed and sufficient when changes are adversarial. See the status section and `reports/` for the per-question breakdowns.
 
 ## Metrics
 
@@ -131,7 +133,7 @@ All model calls go through one client factory (`recall_lab/llm.py`) with shared 
 
 ## Status
 
-Last update: June 9, 2026.
+Last update: June 17, 2026.
 
 Working now:
 

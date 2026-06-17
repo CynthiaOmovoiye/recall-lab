@@ -1166,3 +1166,49 @@ What this means for the thesis. The relocation chain showed validity state was n
 The bug, precisely. In `consolidation/`, a Jun 14 user line that fondly re-mentions an old value ("green is still such a beautiful color, I always come back to it") is (a) promoted by the salience judge and (b) classified CORRECT against the current blue trace, superseding it. Fix direction: the contradiction classifier, or a guard before it, must distinguish a value-setting statement from a sentiment/reminiscence mention. A re-mention that does not assign the attribute as the current value should be UNRELATED, not CORRECT. This is a classifier-intent problem, the same shape as the user-only salience fix: the system must read whether the user is setting a value or just talking about one.
 
 Next step: write a failing test that reproduces the green-re-mention -> wrong CORRECT classification at the `consolidation/contradiction.py` level (offline, deterministic), then fix the classifier prompt or add a value-setting guard, then rerun v16 and confirm recall_lab recovers the blue case without losing the revert. Do not widen any claim until that holds.
+
+---
+
+## June 17, 2026. Trace analysis of the v15+v16 campaigns (Langfuse export). Two real findings, one false alarm caught.
+
+Imported the Langfuse traces/observations for every model call in the v15 and v16 campaigns (5797 calls, 2026-06-16..17) and analysed them. Hard numbers are exact from the observation records; qualitative findings were produced by a multi-agent pass and then re-verified by hand against the raw export before being trusted.
+
+Cost and instrumentation (exact):
+- 5797 calls, $3.35 total. The judge (anthropic/claude-sonnet-4.6, 2166 calls) is $3.08, 92% of spend. The agent (openai/gpt-4o-mini, 3631 calls) is $0.27. Eval cost, not agent volume, dominates, and it scales with campaign size. Before the 30-conversation campaign, tier the judge (cheap-first, escalate to Sonnet only on disagreement) or the bill grows fast.
+- Latency healthy: mean 1.43s, p95 2.97s, one 20.2s outlier. The only 5 ERROR records are the HTTP 402 out-of-credits from the killed v16 first attempt. Nothing else hiding.
+- The Langfuse auto-eval fields (faithfulness, groundedness, completeness, usefulness, technical_depth, context_precision, format_quality, quality_gate_attempt_*) are in the schema but 0 of 5797 are populated. Either the judge structured output is dropped on write or never requested. We are advertising evaluation coverage we do not have; fix before relying on it for regression gating.
+
+Finding that refines the v16 bug (verified against raw traces):
+- The blue stale-re-assertion failure is two-layer, not a classifier-only bug. I had logged it as "the contradiction classifier labelled it CORRECT". The traces show the failure starts one layer up. The salience judge scored the reminiscence line "green is still such a beautiful color, I always come back to it in my head" at 0.55 with the reason "User expresses a stable aesthetic preference for the color green", and promoted it as a preference. The contradiction classifier then received "favorite color is green" against active "blue" and returned CORRECT with reason "the new statement says the favorite color is green, contradicting the old fact that it was blue". Given that input, CORRECT is locally right. So the root cause is salience promoting a sentiment as a value-setting preference; the classifier mislabel is downstream of that. The fix from the June 17 spawned task still applies but the primary target moves upstream: salience must not promote a reminiscence as a value. A classifier-prompt guard is the secondary defence, not the fix.
+- Verified true and useful: extractor attribute naming is stable ("shipping city" used identically across the Berlin and Munich turns, 3/3), so the deterministic 0.40 is not an attribute-splitting artifact. Do not spend effort there.
+
+False alarm, caught and discarded:
+- The multi-agent pass claimed the shellfish Never-Repeat rule was silently demoted to the Past section (a new safety bug). Direct check of all 300 recall-agent briefs in the export: 207 have shellfish correctly in "Things to never repeat", 0 have it demoted to Past. The 5 apparent hits were the prompt's own instructions mentioning the Past section, not the brief body. The claim came from one agent misreading section boundaries in a 30-record slice and generalising. Recorded so the claim does not resurface: shellfish Never-Repeat held across the whole campaign. This is why surprising agent claims get checked against the full data before they enter the log.
+
+Net: no published number changes. The one writeup refinement is the blue-case framing, from "classifier mislabel" to "salience promoted a reminiscence as a preference, surfaced as a classifier CORRECT". Cost tiering and the dead auto-evaluators are the two cheap instrumentation actions before scaling up.
+
+---
+
+## June 17, 2026. v16 post-fix: the salience guard works. Recall Lab is the only agent at 1.00 on the adversarial scenario.
+
+Reran the full lineup on `correction_intent` after the salience value_setting guard, the classifier reminiscence guard, and the invariant linter (commit cf71db1). `--agents all`, 5 runs, pinned provider, 3-call judge audit. 0 split verdicts of 175.
+
+Recall Lab, per question, pre-fix -> post-fix:
+- blue (stale re-assertion): 0/5 -> 5/5. Fixed.
+- Berlin (revert): 5/5 -> 5/5. Held. The fix did not cost the revert.
+- father (implicit correction): 5/5 -> 5/5.
+- shellfish (confirmation control): 5/5 -> 5/5.
+- green-as-history: 1/5 -> 5/5. Recovered as a consequence: once the passing green reminiscence stopped being promoted as the current preference, the active/past lineage stopped inverting, so the history question reads correctly too.
+
+Mean recall accuracy, post-fix: sliding 0.20, strong_rag_dated 0.36, deterministic 0.40, vector 0.68, strong_rag 0.72, episodic 0.92, recall_lab 1.00.
+
+This is the result the adversarial scenario was built to produce. Recall Lab is now the only agent at 1.00, and it got there by handling the two cases that defeat a timestamp sort: the revert (a cancellation that sets no value, deterministic 0/5) and the stale re-assertion (a fond mention that sets no value, deterministic 0/5). Both are the same underlying principle the lab keeps returning to: a statement only changes memory if it sets a value, and authority is about intent, not recency. The fix encoded that at the salience layer, where the v16 trace analysis showed the failure actually began.
+
+What changed and why it is the right fix, not a scenario-specific patch:
+- The guard is a general rule (value-setting vs sentiment), not a hard-coded green/blue case. It blocks any reminiscence from being filed as a current value.
+- The Berlin revert held, so the guard did not over-suppress real changes.
+- The deterministic and episodic baselines were unchanged by the fix (0.40 and 0.92), confirming the scenario did not get easier; Recall Lab moved.
+
+The deterministic 0.40 and episodic 0.92 are the standing comparison. Deterministic still fails both discriminators because max(timestamp) cannot represent a value-less cancellation or tell a reminiscence from a value-set. Episodic passes the re-assertion and history but still drops the revert 2/5, because reading the whole raw log does not force a single authority decision. Only the validity brief gets both, every run.
+
+Next: this is now a clean two-scenario story. relocation_chain shows validity state is not needed when every change is an explicit value-set (everything ties at 1.00). correction_intent shows it is needed and sufficient when changes are adversarial (only recall_lab holds at 1.00). That pair is the Chapter 3 result. README headline updated. The brief-invariant linter (memory/invariants.py) is in place but not yet wired into the sleep job as a runtime assertion; wiring it to fail loudly on a violation during consolidation is a small follow-up.
