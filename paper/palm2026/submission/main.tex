@@ -1,0 +1,173 @@
+\documentclass{article}
+
+% PALM Workshop @ NeurIPS 2026 --- double-blind review, submissions must be fully
+% anonymised (this applies to linked material including code).
+\usepackage[dblblindworkshop]{neurips_2026}
+% Workshop name for the footer. Confirm PALM's preferred full expansion on the CFP.
+\workshoptitle{PALM}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{microtype}
+\usepackage{xcolor}
+
+% ---------------------------------------------------------------------------
+% System name. The repository that hosts this work is public under this name,
+% so if you would rather not give reviewers a searchable handle, change this
+% one line to something neutral (e.g. \newcommand{\sysname}{ValidityBrief}).
+% Nothing else in the document needs editing.
+% ---------------------------------------------------------------------------
+\newcommand{\sysname}{Recall Lab}
+
+\title{Authority Is Not Recency:\\Validity-State Memory for Conversational Agents}
+
+% Anonymised by the dblblindworkshop option; do not add author names.
+\author{%
+  Anonymous Author(s)\\
+  Affiliation\\
+  Address\\
+  \texttt{email}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Conversational memory systems decide what an agent believes about its user, and most decide it with a proxy for authority: a recency boost, a date filter, or ``take the most recent value.'' \sysname{} instead makes authority explicit --- user claims become traces carrying validity state (\emph{active}, \emph{superseded}), superseded traces are rendered under \emph{Past, no longer current} rather than deleted, and only user turns that \emph{set a value} may grant authority.
+Against seven baselines, including a full retrieval stack, date-metadata filtering, a raw episodic read-time judge and a deterministic $\max(\text{timestamp})$ resolver, we report three findings. Where every correction is an explicit value-set, validity state is \emph{unnecessary}: keep-everything, latest-wins and validity state all tie at 1.00, while every retrieval baseline fails the oldest superseded fact. What decides whether retrieval recovers such a chain is not retrieval quality, recency weight, context size or visible timestamps, but \emph{presentation order}: re-sorting the same snippets chronologically moves first-fact accuracy from 0/5 to 4/5. And on an adversarial scenario containing a value-less cancellation and a value-less re-mention, only validity state reaches 1.00, while the timestamp sort falls to 0.40 and the strongest retrieval stack to 0.72.
+The principle: a statement should change memory only if it sets a value. We also report a failure our own consolidation introduced, and how tracing located it.
+\end{abstract}
+
+\section{Introduction}
+
+An assistant that remembers its user must answer a question retrieval does not pose: \emph{of the things this user has told me, which are still true?}
+
+The field largely answers with recency. Vector stores add recency boosts; memory layers filter by date added; agent frameworks resolve conflicts by taking the latest value. These are proxies for \textbf{authority} --- being the current, user-sanctioned truth --- and they work while every correction explicitly restates a value. They break in two places, both common in real conversation:
+
+\begin{itemize}
+\itemsep0em
+\item \textbf{Value-less cancellation.} \emph{``Cancel that change, leave it as it was.''} The most recent statement about the attribute is the one being cancelled; a timestamp sort returns the cancelled value.
+\item \textbf{Value-less re-mention.} \emph{``Green is still such a beautiful color, I always come back to it.''} The user is reminiscing, not setting a preference; a timestamp sort lifts a superseded value back to current.
+\end{itemize}
+
+Both share a structure: \textbf{the most recent mention of an attribute is not an assertion of its current value.} Recency reads \emph{when} something was said, not \emph{whether the user was setting it}.
+
+Contributions: (i)~a memory architecture making authority explicit, where forgetting removes authority rather than history; (ii)~a controlled comparison against seven baselines, including the two strongest non-retrieval alternatives usually omitted --- keep-everything and deterministic latest-value; (iii)~\textbf{a pre-registered negative result we report rather than bury}, naming the scenario property under which validity state is unnecessary; (iv)~isolation of presentation order as the decisive variable for retrieval-based memory; (v)~an adversarial scenario on which only validity state holds.
+
+\section{Related work}
+
+\textbf{Consolidation can degrade memory.} \citet{zhang2026faulty} show that LLM-driven consolidation degrades over time --- utility rises, then falls below a no-memory baseline --- and that an episodic-only control retaining raw trajectories stays competitive with every consolidator they test. We therefore make \texttt{episodic\_judge} a first-class baseline, and Section~\ref{sec:bug} reports that our own consolidator reproduced their finding before we fixed it: pre-guard, the brief scored 0.64 against the episodic control's 0.92. Our claim is not that consolidation is safe, but that a nameable rule about \emph{what may be consolidated} separates the two regimes.
+
+\textbf{Memory systems and benchmarks.} Production memory layers extract and consolidate salient facts into a persistent store \citep{chhikara2025mem0}; \citet{du2026survey} surveys the mechanism families, naming continual consolidation and learned forgetting as open problems. Superseded facts are already a recognised failure axis: LongMemEval \citep{wu2024longmemeval} carries a \emph{knowledge updates} task category, and LoCoMo \citep{maharana2024locomo} evaluates very long-term multi-session dialogue. Those benchmarks measure how often systems fail; we hold retrieval fixed and vary only how authority is decided, to isolate \emph{which} mechanism is responsible.
+
+\textbf{Position and order effects.} \citet{liu2024lost} show that models use information mid-context less reliably than at the edges. Our Section~\ref{sec:order} result is adjacent but distinct: neither a larger context nor visible timestamps recovered the missed fact --- only re-sorting the \emph{same} snippets chronologically did, an ordering effect over and above positional degradation. Finally, \sysname{} adapts truth maintenance \citep{doyle1979tms} and belief revision \citep{agm1985} to the LLM agent memory setting rather than claiming to invent validity tracking.
+
+\section{Method}
+
+\sysname{} maintains a raw \textbf{episodic log} (evidence), a \textbf{trace store} (what consolidation reasons over) and a \textbf{consolidated brief} (what the agent reads). A \textbf{sleep job} runs after each simulated day: score the \emph{user turn only} for salience, so the system cannot grant authority to its own output; compress high-salience claims into traces; check each against active traces and confirm, correct or add; mark corrected traces \emph{superseded} rather than deleting them; render active traces as current memory and superseded ones under \emph{Past, no longer current} with lineage labels. Separating those sections lets the agent answer both ``where do you ship now?'' and ``where did you ship before?''
+
+\textbf{The value-setting guard.} Following the failure in Section~\ref{sec:bug}, salience gates on whether the user turn \emph{assigns the attribute as a current value}; a sentiment or reminiscence mention is \textsc{unrelated}, not \textsc{correction}, with a secondary guard at the contradiction classifier. This is a general rule about intent, not a scenario-specific patch. A brief-invariant check runs after every pass, reporting violations into the pass summary.
+
+\textbf{Baselines.} \texttt{sliding\_window\_2} (last $N$ turns); \texttt{budgeted\_window} (window sized to \sysname{}'s token budget, so shorter prompts cannot win on length alone); \texttt{vector\_topk\_5} (flat top-$k$ similarity); \texttt{strong\_rag} (query rewriting $\rightarrow$ hybrid dense + BM25 $\rightarrow$ reciprocal rank fusion \citep{cormack2009rrf}, $k{=}60$ $\rightarrow$ recency boost $\rightarrow$ LLM reranking; no validity state by design); \texttt{strong\_rag\_dated} (adds \texttt{added\_at} timestamps, timestamp recency, and a metadata filter, \texttt{recency\_window\_days}${=}1.5$); \texttt{episodic\_judge} (inject the whole log every turn, decide currency at read time); \texttt{deterministic} (an LLM extracts value-setting (attribute, value) pairs; the current value is $\max(\texttt{added\_at}, \texttt{turn})$ in pure Python, no model judgement of currency). The last makes the sharpest objection to our thesis concrete: \emph{if the current answer is always the most recently stated value, why classify contradictions at all?}
+
+\textbf{Scenarios.} Both are 4-day customer-assistant conversations, one persona, ending in a 5-question recall evaluation. \texttt{relocation\_chain}: the shipping city changes across three cities and two facts never change; every change is an explicit value-set. \texttt{correction\_intent}: adversarial, built after the Section~\ref{sec:easy} result, adding a \emph{stale re-assertion} (colour green$\rightarrow$blue, then green fondly re-mentioned without changing the preference; expect blue), a \emph{revert} (Berlin$\rightarrow$Munich, then the change cancelled without restating Berlin; expect Berlin), and an \emph{implicit correction by negation}, plus a confirmation control and a history question.
+
+\textbf{Measurement.} Recall accuracy graded by an LLM judge with a 3-call audit; 0 of 175 graded answers split in the Section~\ref{sec:hard} campaign. Model calls are provider-pinned with fallbacks off, because non-deterministic provider routing adds variance unrelated to the memory architecture. 5 seeds per condition per scenario.
+
+\section{Results}
+
+\subsection{Where corrections are explicit, validity state is unnecessary}
+\label{sec:easy}
+
+\begin{table}[t]
+\centering\footnotesize
+\caption{Recall accuracy, 5 seeds each, pinned provider. Read the \texttt{deterministic} row against the last: a timestamp sort \emph{ties} the validity brief where corrections are explicit value-sets, and collapses where they set no value. $^{*}$Coverage artifact: a two-turn window spans the relevant turn for that one question.}
+\label{tab:main}
+\begin{tabular}{lcccc}
+\toprule
+& \multicolumn{1}{c}{\texttt{relocation\_chain}} & \multicolumn{3}{c}{\texttt{correction\_intent}} \\
+\cmidrule(lr){2-2}\cmidrule(lr){3-5}
+Condition & Acc. & Acc. & Revert & Re-assertion \\
+\midrule
+\texttt{sliding\_window\_2}  & 0.00 & 0.20 & 0/5 & 5/5$^{*}$ \\
+\texttt{budgeted\_window}    & 0.08 & --- & --- & --- \\
+\texttt{strong\_rag\_dated}  & 0.40 & 0.36 & 0/5 & 3/5 \\
+\texttt{vector\_topk\_5}     & 0.48 & 0.68 & 0/5 & 3/5 \\
+\texttt{strong\_rag}         & 0.76 & 0.72 & 0/5 & 4/5 \\
+\texttt{episodic\_judge}     & \textbf{1.00} & 0.92 & 3/5 & 5/5 \\
+\texttt{deterministic}       & \textbf{1.00} & 0.40 & 0/5 & 0/5 \\
+\texttt{recall\_lab\_brief}  & \textbf{1.00} & \textbf{1.00} & \textbf{5/5} & \textbf{5/5} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\texttt{strong\_rag} per-question: current city 4/5, previous 5/5, \textbf{first city 0/5}, both stable facts 5/5. A full industry stack recovers the \emph{recent} end of a correction chain and collapses on the \emph{oldest} superseded fact: recency approximates authority near the present and decays into the past.
+
+But \textbf{three very different strategies tie at the ceiling.} Validity state is not justified here: every change is an explicit user-stated value update, exactly where ``take the latest'' is correct by construction. We pre-registered this as a falsification target and report it. Only cost separates them: 438 mean input tokens/turn against \texttt{episodic\_judge}'s 974, a gap that widens with conversation length.
+
+\textbf{Date filtering is actively harmful.} \texttt{strong\_rag\_dated} (0.40) buys a perfect current-city answer by deleting every fact older than the window, including a stable restriction stated on day~1 that never changed (0/4): a hard filter cannot tell ``old but still true'' from ``old and superseded.''
+
+\subsection{The decisive variable is presentation order}
+\label{sec:order}
+
+To remove the objection that the first-city failure is an artifact of two hyperparameters, we ablate recency weight and top-$k$, then give the model the entire conversation with timestamps visible, in relevance order and in chronological order. Real BM25 hybrid retrieval throughout.
+
+\begin{table}[t]
+\centering\footnotesize
+\caption{Fair RAG sweep, \texttt{relocation\_chain}, 5 seeds. Same retrieval and timestamps throughout; only presentation order differs between the last two rows.}
+\label{tab:sweep}
+\begin{tabular}{lccc}
+\toprule
+Config & Mean acc. & First-city & Tokens \\
+\midrule
+\texttt{strong\_rw0.3\_k5}    & 0.68 & 0/5 & 429 \\
+\texttt{strong\_rw0.3\_kFULL} & 0.76 & 0/5 & 902 \\
+\texttt{fairshot} (relevance order) & 0.80 & 0/5 & 969 \\
+\texttt{fairshot\_chrono} (time order) & \textbf{0.96} & \textbf{4/5} & 979 \\
+\midrule
+\emph{ref:} \texttt{recall\_lab\_brief} & 1.00 & 5/5 & \textbf{438} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two pre-registered predictions failed. First-city accuracy did \emph{not} rise with top-$k$: \texttt{kFULL} stayed 0/5, so the fact was in context and still missed --- never a coverage problem. Nor did full context with visible timestamps approach 1.00 in relevance order (0.80, 0/5).
+
+\textbf{Same retrieval, same timestamps, same context size: re-sorting oldest-first took first-city from 0/5 to 4/5.} Relevance ranking scrambles chronology and the model does not reliably re-sort by date on its own. Chronological presentation fixes this at keep-everything token cost; the validity brief reaches the same accuracy at 45\% of the tokens, because it stores ordered lineage explicitly rather than reconstructing it per query.
+
+\subsection{Where corrections set no value, validity state is necessary and sufficient}
+\label{sec:hard}
+
+The timestamp sort that tied at 1.00 collapses to 0.40; only the validity brief holds. On the revert every retrieval baseline scores 0/5 --- retrieval cannot represent a cancellation at all --- and \texttt{deterministic} returns Munich exactly as predicted by construction. Reading the whole raw log does not force a single authority decision either (\texttt{episodic\_judge} 3/5). Both discriminators share one property: \textbf{the most recent mention sets no value.}
+
+\section{Consolidation can promote the wrong thing}
+\label{sec:bug}
+
+Before the guard, \texttt{recall\_lab\_brief} scored \textbf{0.64} on \texttt{correction\_intent}, \emph{below} \texttt{strong\_rag} (0.80) and \texttt{episodic\_judge} (0.92), and 0/5 on the stale re-assertion it was designed to catch.
+
+Trace analysis over the full export (5{,}797 model calls) corrected our initial diagnosis. We first logged it as a contradiction-classifier bug; the traces showed it begins one layer earlier. The \textbf{salience judge} scored the reminiscence line at 0.55, reasoning \emph{``User expresses a stable aesthetic preference for the color green,''} and promoted it as a preference. The classifier then received ``favorite colour is green'' against active ``blue'' and returned \textsc{correction} --- locally correct, given a wrong input. Root cause: salience promoting sentiment as a value-set.
+
+The fix moved upstream. Post-fix: blue 0/5$\rightarrow$5/5; Berlin 5/5$\rightarrow$5/5, so the guard did not over-suppress real changes; the history question 1/5$\rightarrow$5/5 once the lineage stopped inverting. Baselines were unchanged, confirming the scenario did not get easier --- \sysname{} moved.
+
+This is the real cost of consolidation that \citet{zhang2026faulty} warn of: a system that decides what to remember can decide wrongly in a way keep-everything cannot. The mitigation is a general rule about value-setting, and the failure was findable only because every model call was traced.
+
+\section{Limitations}
+
+Two synthetic scenarios, one persona, 5 seeds per condition; the pre-registered 30-conversation campaign has not been run. One agent model, so we cannot separate model-specific effects, particularly the Section~\ref{sec:order} finding that the model does not re-sort scrambled chronology --- a stronger reasoner may. LLM-as-judge grading, audited with 3 calls but not validated against human annotation. No statistical testing; spreads are reported instead of the planned Wilcoxon and bootstrap CIs. Critically, \texttt{correction\_intent} was authored by us after \texttt{relocation\_chain} failed to discriminate; independently authored adversarial scenarios are needed.
+
+\section{Conclusion}
+
+Recency is a proxy for authority that holds while corrections are explicit value-sets and breaks where the most recent mention of an attribute assigns no value to it: cancellations and reminiscences. Making validity state explicit resolves both at bounded token cost, where a retrieval stack, a date filter, keep-everything and a latest-value resolver each fail at least one. Forgetting should remove authority, not erase history; authority should be granted by intent, not timestamp. Code, scenarios, per-run reports and a dated log of every pre-registration and its outcome --- including the predictions we got wrong --- are available anonymised on request.
+
+% page-budget instrumentation: after compiling, `grep endbody main.aux`
+% gives the last body page. Must be <= 4.
+\label{endbody}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
