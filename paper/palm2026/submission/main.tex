@@ -16,12 +16,14 @@
 \usepackage{xcolor}
 
 % ---------------------------------------------------------------------------
-% System name. The repository that hosts this work is public under this name,
-% so if you would rather not give reviewers a searchable handle, change this
-% one line to something neutral (e.g. \newcommand{\sysname}{ValidityBrief}).
-% Nothing else in the document needs editing.
+% System name, deliberately neutral for double-blind review. The public
+% repository behind this work carries a different name, so keeping that name out
+% of the paper removes the obvious search term a reviewer could follow back to
+% the authors. Change this one line to rename the system everywhere. The
+% condition label in the results tables (validity\_brief) is anonymised for the
+% same reason and must be changed with it.
 % ---------------------------------------------------------------------------
-\newcommand{\sysname}{Recall Lab}
+\newcommand{\sysname}{ValidityBrief}
 
 \title{Authority Is Not Recency:\\Validity-State Memory for Conversational Agents}
 
@@ -101,7 +103,7 @@ Condition & Acc. & Acc. & Revert & Re-assertion \\
 \texttt{strong\_rag}         & 0.76 & 0.72 & 0/5 & 4/5 \\
 \texttt{episodic\_judge}     & \textbf{1.00} & 0.92 & 3/5 & 5/5 \\
 \texttt{deterministic}       & \textbf{1.00} & 0.40 & 0/5 & 0/5 \\
-\texttt{recall\_lab\_brief}  & \textbf{1.00} & \textbf{1.00} & \textbf{5/5} & \textbf{5/5} \\
+\texttt{validity\_brief}  & \textbf{1.00} & \textbf{1.00} & \textbf{5/5} & \textbf{5/5} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -130,7 +132,7 @@ Config & Mean acc. & First-city & Tokens \\
 \texttt{fairshot} (relevance order) & 0.80 & 0/5 & 969 \\
 \texttt{fairshot\_chrono} (time order) & \textbf{0.96} & \textbf{4/5} & 979 \\
 \midrule
-\emph{ref:} \texttt{recall\_lab\_brief} & 1.00 & 5/5 & \textbf{438} \\
+\emph{ref:} \texttt{validity\_brief} & 1.00 & 5/5 & \textbf{438} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -147,7 +149,7 @@ The timestamp sort that tied at 1.00 collapses to 0.40; only the validity brief 
 \section{Consolidation can promote the wrong thing}
 \label{sec:bug}
 
-Before the guard, \texttt{recall\_lab\_brief} scored \textbf{0.64} on \texttt{correction\_intent}, \emph{below} \texttt{strong\_rag} (0.80) and \texttt{episodic\_judge} (0.92), and 0/5 on the stale re-assertion it was designed to catch.
+Before the guard, \texttt{validity\_brief} scored \textbf{0.64} on \texttt{correction\_intent}, \emph{below} \texttt{strong\_rag} (0.80) and \texttt{episodic\_judge} (0.92), and 0/5 on the stale re-assertion it was designed to catch.
 
 Trace analysis over the full export (5{,}797 model calls) corrected our initial diagnosis. We first logged it as a contradiction-classifier bug; the traces showed it begins one layer earlier. The \textbf{salience judge} scored the reminiscence line at 0.55, reasoning \emph{``User expresses a stable aesthetic preference for the color green,''} and promoted it as a preference. The classifier then received ``favorite colour is green'' against active ``blue'' and returned \textsc{correction} --- locally correct, given a wrong input. Root cause: salience promoting sentiment as a value-set.
 

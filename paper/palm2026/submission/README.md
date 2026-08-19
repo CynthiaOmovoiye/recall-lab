@@ -40,11 +40,10 @@ exactly at the limit, so any addition needs a matching cut.
    credentials or submit on your behalf.
 2. **Nominate a reviewer.** The CFP asks that at least one qualifying author
    nominate one. Have a name ready before you open the form.
-3. **Decide on the system name.** `main.tex` line ~22 defines
-   `\newcommand{\sysname}{Recall Lab}`. The public repo is `recall-lab`, so under
-   strict anonymisation that name is a searchable handle. Changing that one line
-   renames it everywhere. Reviewers are not supposed to search — this is your
-   risk call, not a rule violation either way.
+3. ~~Decide on the system name.~~ **Done.** `\sysname` is now `ValidityBrief`,
+   and the results-table condition label is `validity_brief` (it read
+   `recall_lab_brief`, which mapped to the repo name just as directly). If you
+   ever rename the system again, change both together.
 4. **Confirm the footer.** It reads "Submitted to 40th Conference…" rather than
    naming the workshop; that string is baked into this version of the official
    `.sty`. Harmless, but check the CFP in case they want something specific.
@@ -60,7 +59,7 @@ reproducibility sentence offers materials "anonymised on request." The residual
 exposure is that someone who searches the title could reach the repo. Two
 mitigations, in order of cost:
 
-- Change `\sysname` (above). Cheapest, removes the strongest search term.
+- ~~Change `\sysname`.~~ Done, along with the table label.
 - Make the repo private until reviews are returned. Most thorough, but the
   research log has been public since May and the results are already out there.
 
