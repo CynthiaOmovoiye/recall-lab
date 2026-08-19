@@ -1212,3 +1212,47 @@ What changed and why it is the right fix, not a scenario-specific patch:
 The deterministic 0.40 and episodic 0.92 are the standing comparison. Deterministic still fails both discriminators because max(timestamp) cannot represent a value-less cancellation or tell a reminiscence from a value-set. Episodic passes the re-assertion and history but still drops the revert 2/5, because reading the whole raw log does not force a single authority decision. Only the validity brief gets both, every run.
 
 Next: this is now a clean two-scenario story. relocation_chain shows validity state is not needed when every change is an explicit value-set (everything ties at 1.00). correction_intent shows it is needed and sufficient when changes are adversarial (only recall_lab holds at 1.00). That pair is the Chapter 3 result. README headline updated. The brief-invariant linter (memory/invariants.py) is in place but not yet wired into the sleep job as a runtime assertion; wiring it to fail loudly on a violation during consolidation is a small follow-up.
+
+---
+
+## August 19, 2026. Documentation sync audit. One unlogged change, and every published number re-verified.
+
+No new experiments. This is a state-of-the-repo audit before the Recall Lab result goes out as a paper, so nothing gets published against a stale claim.
+
+### The one real gap: the invariant linter was wired and never logged
+
+The June 17 v16 post-fix entry ends with "the brief-invariant linter (`memory/invariants.py`) is in place but not yet wired into the sleep job as a runtime assertion; wiring it to fail loudly on a violation during consolidation is a small follow-up."
+
+That follow-up was done the same evening, in commit `a3492f7`, and no log entry was written for it. The log has been wrong on this point for two months. What actually shipped:
+
+- `run_sleep_job` now runs `check_invariants` after every consolidation pass.
+- Default is **non-strict**: violations are reported in the returned summary dict under `invariant_violations` and warned to stdout, but do not raise. This is deliberate. A hard raise mid-pass would abort a whole variance campaign and lose the other runs' data over one bad pass.
+- `strict=True` raises `BriefInvariantError` instead, for tests and CI.
+- Tests cover a seeded active/past overlap being reported in non-strict mode and raising in strict mode, and a clean store reporting nothing.
+
+So the answer to "is the linter a runtime assertion yet" is yes, in reporting mode, since June 17. Suite is at 81 passing, ruff clean.
+
+### Every published number re-verified against `reports/`, not against this log
+
+Each figure that is about to appear in an external writeup was checked against the campaign artifacts rather than re-read from the prose here. All of them hold:
+
+| Claim | Source artifact | Verified |
+| --- | --- | --- |
+| v12 relocation lineup: sliding 0.00, vector 0.52, strong_rag 0.76, episodic 1.00, brief 1.00 | `v12_chapter3_lineup/variance_summary.md` | exact |
+| v15 relocation lineup: + strong_rag_dated 0.40, vector 0.48, deterministic 1.00 | `v15_deterministic_all/variance_summary.md` | exact |
+| v16 post-fix adversarial: sliding 0.20, dated 0.36, deterministic 0.40, vector 0.68, strong_rag 0.72, episodic 0.92, brief 1.00 | `v16_correction_intent_postfix/variance_summary.md` | exact |
+| Judge audit, v16 post-fix: 0 splits of 175 | same | exact |
+
+One number that existed only as ambiguous prose is now pinned. The June 17 post-fix entry said episodic "still drops the revert 2/5", which reads either as *scores* 2/5 or *fails* 2 of 5. The artifact settles it: on "What city should you ship to right now?" episodic_judge passes **3/5**. Recall Lab passes 5/5; deterministic and all four retrieval controls pass 0/5.
+
+Also worth recording from the per-question table, because it is a coverage artifact and not a result: `sliding_window_2` scores 5/5 on the current-colour question in `correction_intent`. A two-turn window happens to span the relevant turn for that one question, which is why its mean is 0.20 rather than 0.00. It is not evidence of anything about recency windows.
+
+### Docs brought back in sync in this pass
+
+- `protocol.md` — did not describe `correction_intent` at all, did not carry the value-setting guard as part of the mechanism under test, and its falsification section was still purely forward-looking even though a falsification event (v15) has already happened and been reported. All three fixed.
+- `README.md` — the "Current public read" block described only the relocation chain and still carried the caveat "one relocation scenario", while §Controls elsewhere in the same file correctly described the two-scenario result. Internally contradictory; the public read now states the two-scenario claim. `memory/invariants.py` added to Working now.
+- `diagrams/README.md` — §5 was still "v10 results", six campaign versions behind. Replaced with the current two-scenario pair.
+
+### Status of the public claim after this audit
+
+Unchanged in substance. The claim is the two-scenario pair, and no figure moved. What changed is that the docs now say the same thing as the artifacts.

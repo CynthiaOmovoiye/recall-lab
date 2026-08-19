@@ -106,21 +106,52 @@ sequenceDiagram
 
 ---
 
-## 5. v10 results on the relocation chain
+## 5. Results: the two-scenario pair
 
-Mean recall accuracy across runs, one synthetic scenario. The recency baselines
-and flat vector retrieval fall short; the validity-aware system holds. Source:
-`research-log.md` (May 29 entry) and `reports/variance/v10_*`.
+The result is the pair of charts, not either one. Read together they say when
+validity state is unnecessary and when it is decisive. Source: `research-log.md`
+(June 16 and June 17 entries) and `reports/variance/v15_*`, `v16_*`.
+
+### 5a. `relocation_chain` — every change is an explicit value-set
+
+Five runs, pinned provider (v15).
 
 ```mermaid
 xychart-beta
-    title "relocation_chain recall accuracy (v10, mean over runs)"
-    x-axis ["sliding", "equal-budget", "vector", "Recall Lab"]
+    title "relocation_chain recall accuracy (v15, mean over 5 runs)"
+    x-axis ["sliding", "dated RAG", "vector", "strong RAG", "episodic", "deterministic", "Recall Lab"]
     y-axis "recall accuracy" 0 --> 1
-    bar [0.00, 0.04, 0.55, 1.00]
+    bar [0.00, 0.40, 0.48, 0.76, 1.00, 1.00, 1.00]
 ```
 
-Read: retrieval finds candidates, authority decides which one wins. The vector
-control keeps facts that never changed but cannot order a chain of corrections.
-Matching the recency baseline's token budget to Recall Lab's does not close the
-gap, so the win is authority, not prompt length.
+Read: retrieval finds candidates, authority decides which one wins — every
+retrieval baseline fails the oldest superseded fact. But the three rightmost bars
+tie. A deterministic `max(timestamp)` sort matches the validity brief here,
+because every correction in this scenario is an explicit user-stated value-set,
+which is exactly the case where "take the latest" is correct by construction.
+**This scenario does not justify validity state.** That is a falsification result,
+and it is why the adversarial scenario exists.
+
+### 5b. `correction_intent` — corrections that set no value
+
+Five runs, pinned provider, post-fix (v16). Carries a revert (a change cancelled
+without restating the prior value) and a stale re-assertion (a superseded value
+fondly re-mentioned in passing).
+
+```mermaid
+xychart-beta
+    title "correction_intent recall accuracy (v16 post-fix, mean over 5 runs)"
+    x-axis ["sliding", "dated RAG", "deterministic", "vector", "strong RAG", "episodic", "Recall Lab"]
+    y-axis "recall accuracy" 0 --> 1
+    bar [0.20, 0.36, 0.40, 0.68, 0.72, 0.92, 1.00]
+```
+
+Read: the timestamp sort that tied at 1.00 in 5a collapses to 0.40, and Recall Lab
+is the only condition at 1.00. On the revert it scores 5/5 where deterministic and
+all four retrieval controls score 0/5 and the raw episodic judge scores 3/5. Both
+discriminators share one property — **the most recent mention of the attribute
+sets no value** — which recency, timestamps and similarity are all blind to.
+
+Caveat on 5b: `sliding_window_2` scores 0.20 rather than 0.00 only because a
+two-turn window happens to span the relevant turn for the current-colour question.
+That is a coverage artifact, not a finding.
