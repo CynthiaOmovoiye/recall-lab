@@ -1,6 +1,6 @@
 # Recall Lab Protocol
 
-Status: draft protocol, to be completed before first results are published.
+Status: active. Two scenarios have been run to completion under the pinned-provider setup (v12–v16); the 30-conversation campaign in Planned dataset has not. Last synced August 19, 2026.
 
 ## Research question
 
@@ -9,6 +9,16 @@ Does validity-state memory consolidation with user-only salience improve long-ho
 ## Hypothesis
 
 An agent that consolidates high-salience user turns into a brief, tracks each memory's validity state (active, superseded, archived), and renders superseded memories into a `Past, no longer current` section will maintain coherence over long conversations with fewer hallucinated and stale-memory recall failures than agents that rely on recency windows or flat vector retrieval. The mechanism under test is validity state plus user-only salience: only user turns can grant a memory authority, and a corrected fact loses authority without being erased.
+
+### Amendment, June 17, 2026: the value-setting guard
+
+The v16 adversarial campaign found that user-only salience is necessary but not sufficient. A user turn that mentions an attribute without assigning it — a fond re-mention of a superseded value — was promoted by the salience judge as a current preference, and the contradiction classifier then correctly labelled it `CORRECT` against the active trace, inverting the lineage. The failure originated at the salience layer, not the classifier.
+
+The mechanism under test is therefore amended to: **a statement grants or changes authority only if it sets a value.** Salience distinguishes a value-setting statement from sentiment or reminiscence about a value; a re-mention that does not assign the attribute as current is `UNRELATED`. A reminiscence guard at the contradiction classifier is the secondary defence, not the fix. This is a general rule about intent, not a scenario-specific patch, and it is the form of the hypothesis that the `correction_intent` results test.
+
+### Runtime invariant checking
+
+`memory/invariants.py` defines the brief invariants (principally: no trace may be simultaneously active and past). Since commit `a3492f7`, `run_sleep_job` runs `check_invariants` after every consolidation pass. Non-strict by default: violations are reported in the summary dict under `invariant_violations` and warned to stdout, but do not raise, so one bad pass cannot abort a campaign and destroy the other runs' data. `strict=True` raises `BriefInvariantError`, for tests and CI.
 
 ## Conditions
 
@@ -29,6 +39,36 @@ Planned, not built yet (one-line cost to build):
 - Full long-context oracle: full conversation in context where it fits. Cost: a thin agent that concatenates the whole log, plus per-model context-limit handling, half a day.
 - Random-curated brief: a brief filled with randomly selected exchanges at Recall Lab's size. Cost: a sampler over the log, a few hours. Isolates curation quality from brief format.
 - Human-curated brief: a brief hand-written by a person from the same log. Cost: a labeling tool plus annotator time, the largest of the planned items.
+
+## Scenarios run
+
+Both are four-day customer-assistant conversations with a fixed persona, ending in a five-question recall evaluation. Files in `scenarios/`.
+
+**`relocation_chain`** — an ordered correction chain. The shipping city changes across three cities; two facts (favourite colour, a shellfish restriction) are stated once and never change. Evaluation asks for the current, previous and first city, plus both stable facts. Every change is an explicit, unambiguous, user-stated value-set.
+
+Purpose: expose whether retrieval can order a chain of superseded facts. It does that well. It does **not** separate validity-state reasoning from a timestamp sort, because "take the latest" is correct by construction when every change is an explicit value-set. See the falsification record below.
+
+**`correction_intent`** — adversarial, same shape, built after v15 to discriminate what `relocation_chain` could not. Three discriminators:
+
+- **Stale re-assertion** (expect *blue*): colour changed green → blue, then green fondly re-mentioned in passing without changing the preference. The late mention lifts a superseded value under any recency or timestamp rule.
+- **Revert** (expect *Berlin*): shipping Berlin → Munich, then the Munich change cancelled without restating Berlin. The most recent value-set is Munich, so a timestamp sort returns the cancelled value.
+- **Implicit correction by negation** (expect *father*): the attribute is corrected without being restated as `attribute=value`.
+
+Plus two controls: a confirmation-that-is-not-a-change (the food restriction, explicitly reaffirmed) and a history question (the original colour before the change).
+
+Both discriminators share one property, and it is the property the amended hypothesis names: **the most recent mention of the attribute sets no value.**
+
+Note on interpretation: `sliding_window_2` scores 5/5 on the current-colour question here purely because a two-turn window happens to span the relevant turn. That is a coverage artifact and carries no information about recency windows.
+
+## Falsification record
+
+The falsification target below was written before results. One falsification event has occurred and is recorded here rather than only in the log.
+
+**v15, June 16, 2026 — falsified for `relocation_chain`.** The deterministic latest-value resolver reached 1.00, matching Recall Lab and the raw episodic judge. Three very different strategies tied at the ceiling, so that scenario does not justify validity-state consolidation over the two simpler non-retrieval baselines. Reported, not buried. The response was not to weaken the claim but to build the scenario that discriminates (`correction_intent`), and to state the condition under which validity state is unnecessary: when every change is an explicit value-set.
+
+**v16 post-fix, June 17, 2026 — held for `correction_intent`.** Recall Lab is the only condition at 1.00 (deterministic 0.40, strong RAG 0.72, raw episodic 0.92). It uniquely handles both the revert and the stale re-assertion.
+
+The scoped claim is therefore the **pair**, not either scenario alone: validity state is unnecessary when corrections are explicit value-sets, and necessary and sufficient when they are not. Any writeup that reports only `correction_intent` over-claims; any writeup that reports only `relocation_chain` concludes the mechanism is over-engineered. Both are required.
 
 ## Planned dataset
 
@@ -96,6 +136,8 @@ These values live in `recall_lab/config.py` and `.env.example`: `RECALL_OPENROUT
 ## Falsification target
 
 If the validity-state brief shows no improvement over flat vector retrieval and the budget-matched recency baseline on honest-failure metrics across the 30-conversation campaign, the validity-state hypothesis is falsified for this setup.
+
+Added after v15, and the stricter test: retrieval baselines are no longer the bar that matters. The hypothesis is falsified if the brief shows no improvement over the **deterministic latest-value resolver and the raw episodic judge** on a scenario whose corrections are not all explicit value-sets. Beating retrieval alone is not sufficient evidence for validity state, because v15 showed a timestamp sort can match the brief wherever the retrieval baselines fail. See Falsification record.
 
 ## Future work
 

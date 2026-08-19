@@ -52,7 +52,7 @@ Every sleep pass:
 
 The brief is what the agent reads. The trace store is what the sleep job reasons over.
 
-Rendered diagrams of the pipeline, memory layers, validity state machine, source boundary, and v10 results are in [`diagrams/`](diagrams/README.md).
+Rendered diagrams of the pipeline, memory layers, validity state machine, source boundary, and the two-scenario results (v15 and v16 post-fix) are in [`diagrams/`](diagrams/README.md).
 
 ## Memory states
 
@@ -133,7 +133,7 @@ All model calls go through one client factory (`recall_lab/llm.py`) with shared 
 
 ## Status
 
-Last update: June 17, 2026.
+Last update: August 19, 2026 (documentation sync audit; no new experiments since June 17, 2026). Test suite: 81 passing.
 
 Working now:
 
@@ -147,7 +147,9 @@ Working now:
 - `memory/traces.py` renders superseded memories into `Past, no longer current` with explicit labels such as `Earliest past` and `Most recent past before current`.
 - `memory/brief.py` loads, renders, deduplicates, and saves the consolidated memory brief.
 - `consolidation/judge.py` scores only the user turn. The agent turn is hidden from the salience judge so the system cannot promote its own generated text as user truth.
-- `consolidation/sleep.py` routes promoted memories through salience, trace creation, contradiction checks, validity transitions, activation ranking, and brief rendering.
+- `consolidation/sleep.py` routes promoted memories through salience, trace creation, contradiction checks, validity transitions, activation ranking, and brief rendering. Since `a3492f7` it also runs `check_invariants` after every consolidation pass.
+- `memory/invariants.py` defines the brief invariants, principally that no trace may be simultaneously active and past, and provides `check_invariants`. Wired into the sleep job in reporting mode: violations land in the pass summary under `invariant_violations` and warn to stdout but do not raise, so one bad pass cannot abort a campaign and lose the other runs' data. `strict=True` raises `BriefInvariantError`, for tests and CI.
+- `consolidation/judge.py` and `consolidation/contradiction.py` carry the value-setting guard added after v16: a user turn that mentions an attribute without assigning it as the current value is not promoted as a preference and is not classified as a correction. This is what closes the stale-re-assertion failure.
 - `controls/vector.py` implements the flat vector-retrieval control: each exchange is embedded in an isolated in-memory ChromaDB collection and the top-k most similar are retrieved per turn. It has no validity state, so a superseded fact and its correction compete on similarity alone. The embedding function is injectable for offline, key-free tests.
 - `controls/budgeted.py` implements a sliding window bounded by an input-token budget instead of a turn count, for the equal-token-budget comparison.
 - `controls/episodic.py` implements the raw episodic read-time-judge control: keep every statement verbatim, inject the whole log each turn, and ask the model to work out the current answer. No consolidation runs. This is the "just keep everything" baseline from arxiv 2605.12978, which found that repeatedly rewriting memory degrades it. It tests whether validity-state consolidation beats raw retention, on accuracy and on the growing input-token cost.
@@ -286,13 +288,13 @@ Reports go under `reports/`, which is gitignored, so raw per-run outputs stay lo
 
 ## Current public read
 
-The current honest claim is narrow:
+The current honest claim is a **pair of scenarios**, and reporting either one alone misstates it:
 
-> On two synthetic multi-day memory scenarios, with model calls pinned to one provider per family for reproducibility, Recall Lab's brief-backed memory held `1.00` recall while the baselines did not: a two-turn sliding window (`0.00`), flat vector retrieval (`0.52`), and even a production-grade RAG stack with query rewriting, hybrid retrieval, reranking, and recency (`0.76`). The strong RAG stack recovered the recent links of a correction chain and missed the first one every run. A fair sweep showed the cause was order of presentation, not retrieval quality: only reordering the same retrieved context chronologically recovered the first fact, and only by carrying the whole history at a token cost the bounded brief avoids. The result shows a mechanism, not a benchmark.
+> On two synthetic multi-day memory scenarios, with model calls pinned to one provider per family for reproducibility, validity-state memory is unnecessary in one and decisive in the other, and the difference is nameable. On `relocation_chain`, where every correction is an explicit user-stated value-set, three very different strategies tie at `1.00` — the validity brief, the raw episodic judge, and a deterministic `max(timestamp)` resolver — while every retrieval baseline fails the oldest superseded fact: flat vector `0.48`, and a production-grade RAG stack with query rewriting, hybrid retrieval, reranking and recency `0.76`. On `correction_intent`, which carries a revert and a stale re-assertion (two statements whose most recent mention sets no value), only the validity brief holds `1.00`; the timestamp sort falls to `0.40`, strong RAG to `0.72`, and the raw episodic judge to `0.92`. The result shows a mechanism, not a benchmark.
 
-The strong RAG control isolates the point: standard and even well-engineered retrieval recall un-superseded facts but cannot order a chain of corrections, because similarity ranking has no notion of sequence. The equal-token-budget control shows the win is not prompt length: matching the recency baseline's budget to Recall Lab's does not close the gap.
+Two controls carry most of the weight. The **strong RAG** stack isolates the retrieval point: well-engineered retrieval recalls un-superseded facts but cannot order a chain of corrections, because similarity ranking has no notion of sequence. A fair sweep showed the cause is order of presentation, not retrieval quality — reordering the same retrieved context chronologically recovered the first fact, but only by carrying the whole history at a token cost the bounded brief avoids. The **deterministic resolver** isolates the harder point, and it is the one that falsified the easy scenario: a timestamp sort matches the brief wherever retrieval fails, so beating retrieval is not evidence for validity state. What a timestamp sort cannot represent is a value-less cancellation or a value-less re-mention, which is precisely where `correction_intent` separates them.
 
-Caveats that stay attached: one relocation scenario, four to five runs per control, no statistical test yet, and a single model family. This is not a general memory benchmark. The next steps are a long-context control, more scenarios, and the pre-registered 30-conversation protocol in `protocol.md`.
+Caveats that stay attached: two synthetic scenarios with one persona, four to five runs per control, no statistical test yet, a single agent model, and `correction_intent` was authored by us after observing that `relocation_chain` failed to discriminate. This is not a general memory benchmark. Next steps are a long-context control, independently authored adversarial scenarios, and the pre-registered 30-conversation protocol in `protocol.md`.
 
 ## Prior art note
 
