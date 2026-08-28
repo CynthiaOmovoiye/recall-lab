@@ -78,6 +78,73 @@ def _judge_audit_lines(payloads: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+HONEST_GAP_LABEL = "honest_gap"
+
+
+def _coverage(agent: dict[str, Any]) -> float:
+    """Share of final-eval questions the agent committed an answer to.
+
+    Prefers the value the trial computed. Falls back to deriving it from the
+    graded records, so the equal-budget payload, which is built by its own
+    runner, summarizes the same way as the multiday one.
+    """
+    if agent.get("coverage") is not None:
+        return float(agent["coverage"])
+    records = agent.get("final_eval") or []
+    if not records:
+        return 0.0
+    answered = sum(1 for r in records if r.get("failure_mode") != HONEST_GAP_LABEL)
+    return answered / len(records)
+
+
+def _refusal_lines(by_agent: dict[str, list[dict[str, Any]]]) -> list[str]:
+    """Per-reason refusal counts, summed across runs.
+
+    Only scenarios that tag questions with an `abstain_reason` produce these.
+    Conflict, absence, and revoked are counted apart because they are three
+    different skills: spotting that two facts contest each other, spotting that
+    a fact was never stated, and honouring a withdrawal.
+    """
+    totals: dict[str, dict[str, dict[str, int]]] = {}
+    reasons: set[str] = set()
+    for name, runs in by_agent.items():
+        for run in runs:
+            for record in run.get("final_eval") or []:
+                reason = record.get("abstain_reason")
+                if not reason:
+                    continue
+                reasons.add(reason)
+                bucket = totals.setdefault(name, {}).setdefault(
+                    reason, {"refused": 0, "total": 0}
+                )
+                bucket["total"] += 1
+                if record.get("failure_mode") == HONEST_GAP_LABEL:
+                    bucket["refused"] += 1
+
+    if not reasons:
+        return []
+
+    ordered = sorted(reasons)
+    lines = [
+        "",
+        "## Refusals caught, by reason",
+        "",
+        "Questions whose correct outcome is a refusal, summed across runs. An "
+        "agent with no way to abstain should score zero here while still "
+        "answering everything else.",
+        "",
+        "| Agent | " + " | ".join(ordered) + " |",
+        "|---|" + "---:|" * len(ordered),
+    ]
+    for name in by_agent:
+        cells = []
+        for reason in ordered:
+            bucket = totals.get(name, {}).get(reason)
+            cells.append(f"{bucket['refused']}/{bucket['total']}" if bucket else "-")
+        lines.append(f"| {name} | " + " | ".join(cells) + " |")
+    return lines
+
+
 def write_summary(payloads: list[dict[str, Any]], path: Path) -> None:
     """Aggregate the runs into one markdown summary."""
     by_agent: dict[str, list[dict[str, Any]]] = {}
@@ -104,12 +171,34 @@ def write_summary(payloads: list[dict[str, Any]], path: Path) -> None:
             row.append(f"{runs[i]['recall_accuracy']:.2f}")
         lines.append("| " + " | ".join(row) + " |")
 
+    lines += [
+        "",
+        "## Coverage per run",
+        "",
+        "Questions the agent committed an answer to, over all questions. "
+        "Accuracy alone hides an agent that guesses on everything, and it "
+        "hides the opposite failure too: on a scenario with refusal questions "
+        "in it, an agent that refuses everything can post a respectable "
+        "accuracy while being no use at all.",
+        "",
+        "| Run | " + " | ".join(by_agent) + " |",
+        "|" + "---|" * (len(by_agent) + 1),
+    ]
+    for i in range(len(payloads)):
+        row = [f"run {i + 1}"]
+        for runs in by_agent.values():
+            row.append(f"{_coverage(runs[i]):.2f}")
+        lines.append("| " + " | ".join(row) + " |")
+
     lines += ["", "## Spread", ""]
     for name, runs in by_agent.items():
         accs = [r["recall_accuracy"] for r in runs]
         mean = statistics.mean(accs)
+        covs = [_coverage(r) for r in runs]
         lines.append(
             f"- {name}: min {min(accs):.2f}, max {max(accs):.2f}, mean {mean:.2f}"
+            f"  |  coverage min {min(covs):.2f}, max {max(covs):.2f}, "
+            f"mean {statistics.mean(covs):.2f}"
         )
 
     lines += ["", "## Per-question pass count across runs", ""]
@@ -127,6 +216,7 @@ def write_summary(payloads: list[dict[str, Any]], path: Path) -> None:
             lines.append(f"- {passed}/{total}  {question}")
         lines.append("")
 
+    lines += _refusal_lines(by_agent)
     lines += _judge_audit_lines(payloads)
 
     path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
@@ -178,7 +268,8 @@ def run_variance(
             for agent in payload["agents"]:
                 print(
                     f"  {agent['agent_name']}: "
-                    f"accuracy {agent['recall_accuracy']:.2f}",
+                    f"accuracy {agent['recall_accuracy']:.2f}, "
+                    f"coverage {_coverage(agent):.2f}",
                     flush=True,
                 )
         except Exception as exc:  # noqa: BLE001 - one bad run must not kill the batch

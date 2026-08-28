@@ -49,6 +49,49 @@ UNCERTAINTY_MARKERS = (
     "you haven't told me",
 )
 
+# The literal `expected` value that marks a question whose correct outcome is a
+# refusal. A scenario question carrying this instead of a fact is scored on the
+# abstain axis: refusing is right, answering confidently is a hallucination.
+ABSTAIN_EXPECTED = "HONEST_GAP"
+
+# Refusal phrasings, used only when the expected answer is a refusal. On that
+# axis there is no expected string to match, so the only signal is whether the
+# agent declined to give a value. UNCERTAINTY_MARKERS is the older, narrower
+# list behind the offline fallback scorer and is left untouched, so nothing
+# already published changes; these extend it for the abstain questions only.
+ABSTAIN_MARKERS = UNCERTAINTY_MARKERS + (
+    "i cannot tell",
+    "i can't tell",
+    "i'm not sure",
+    "i am not sure",
+    "i don't have",
+    "i do not have",
+    "i no longer have",
+    "i don't recall",
+    "i do not recall",
+    "cannot determine",
+    "can't determine",
+    "unable to determine",
+    "cannot confirm",
+    "can't confirm",
+    "i'm unable to",
+    "i am unable to",
+    "never told me",
+    "never mentioned",
+    "never gave me",
+    "didn't tell me",
+    "did not tell me",
+    "you have not given me",
+    "you haven't given me",
+    "asked me to forget",
+    "asked me to remove",
+    "asked me not to keep",
+    "no longer stored",
+    "no record",
+    "don't have a record",
+    "do not have a record",
+)
+
 
 def estimate_tokens(text: str) -> int:
     """Cheap token estimate for lab notes.
@@ -184,6 +227,40 @@ class JudgeResult:
     def unanimous(self) -> bool:
         """True when every judge call returned the same label."""
         return len(set(self.votes)) <= 1
+
+
+def expects_abstain(expected: str | None) -> bool:
+    """True when a scenario question's correct outcome is a refusal.
+
+    Marked by the literal `expected` value HONEST_GAP instead of a fact.
+    """
+    return (expected or "").strip().upper() == ABSTAIN_EXPECTED
+
+
+def looks_like_abstain(response: str) -> bool:
+    """True when the answer declines to give a value."""
+    normalized = (response or "").lower()
+    return any(marker in normalized for marker in ABSTAIN_MARKERS)
+
+
+def score_abstain_answer(response: str) -> JudgeResult:
+    """Score one answer to a question whose correct outcome is a refusal.
+
+    Every question in every scenario before this one expected a positive
+    string, so the judge only ever had to ask "does this answer name the
+    expected fact?". A refusal question inverts that: there is no fact to name,
+    and the only thing to measure is whether the agent knew to hold.
+
+    The verdict is deterministic and costs no judge call. A refusal is
+    HONEST_GAP, which the caller counts as correct. Anything else is a
+    confident answer to a question that has no answer, so it is HALLUCINATED.
+    """
+    mode = (
+        FailureMode.HONEST_GAP
+        if looks_like_abstain(response)
+        else FailureMode.HALLUCINATED
+    )
+    return JudgeResult(mode=mode, votes=[mode])
 
 
 def judge_answer(

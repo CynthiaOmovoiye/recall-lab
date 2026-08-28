@@ -28,7 +28,13 @@ from recall_lab.config import STRONG_RAG_RECENCY_WINDOW_DAYS
 from recall_lab.controls.sliding import SlidingWindowAgent
 from recall_lab.controls.strong_rag import StrongRAGAgent
 from recall_lab.controls.vector import VectorRetrievalAgent
-from recall_lab.eval.metrics import FailureMode, estimate_tokens, judge_answer
+from recall_lab.eval.metrics import (
+    FailureMode,
+    estimate_tokens,
+    expects_abstain,
+    judge_answer,
+    score_abstain_answer,
+)
 from recall_lab.memory.brief import Brief
 from recall_lab.memory.episodic import EpisodicLog
 from recall_lab.memory.traces import MemoryTraceStore
@@ -52,6 +58,7 @@ class AnswerRecord:
     user: str
     agent: str
     expected: str | None = None
+    abstain_reason: str | None = None
     failure_mode: str | None = None
     correct: bool | None = None
     output_tokens_estimate: int = 0
@@ -80,6 +87,70 @@ class AgentTrialResult:
             return 0.0
         correct = sum(1 for record in eval_records if record.correct)
         return correct / len(eval_records)
+
+    @property
+    def answered_records(self) -> list[AnswerRecord]:
+        """Final-eval questions the agent actually committed an answer to.
+
+        A refusal is not an answer. That is the whole point of the abstain
+        axis: an agent can be right by holding, and it can be useless by
+        holding on everything, and one accuracy number cannot tell those apart.
+        """
+        return [
+            record
+            for record in self.eval_records
+            if record.failure_mode != FailureMode.HONEST_GAP.value
+        ]
+
+    @property
+    def selective_accuracy(self) -> float:
+        """Correct answers over all questions.
+
+        The name comes from arxiv 2605.30087, which scores a memory agent on
+        two numbers rather than one. On this harness it is arithmetically the
+        same as `recall_accuracy`, because every final-eval question is graded
+        and a correct refusal already counts as correct. It is reported under
+        its own name so the pair reads the way the paper's pair reads, and so
+        the meaning survives if the question set ever stops being fully graded.
+        `coverage` is the number that carries the new information.
+        """
+        return self.recall_accuracy
+
+    @property
+    def coverage(self) -> float:
+        """Questions answered over all questions.
+
+        Recall accuracy alone hides an agent that guesses on everything.
+        Coverage is what exposes it, and it is also what exposes the opposite
+        failure: an agent that refuses everything scores a safe-looking
+        accuracy on a scenario with refusal questions in it while being no use
+        at all.
+        """
+        eval_records = self.eval_records
+        if not eval_records:
+            return 0.0
+        return len(self.answered_records) / len(eval_records)
+
+    @property
+    def refusals_by_reason(self) -> dict[str, dict[str, int]]:
+        """Refusals caught per abstain reason, tagged from the scenario.
+
+        A question carrying an optional `abstain_reason` (conflict, absence,
+        revoked) is counted here as caught or missed. The reasons are scored
+        apart because they fail apart: knowing that two facts contest each
+        other is not the same skill as knowing a fact was never stated, which
+        is not the same as honouring a withdrawal. An agent can pass one and
+        confabulate on the next.
+        """
+        buckets: dict[str, dict[str, int]] = {}
+        for record in self.eval_records:
+            if not record.abstain_reason:
+                continue
+            bucket = buckets.setdefault(record.abstain_reason, {"refused": 0, "total": 0})
+            bucket["total"] += 1
+            if record.failure_mode == FailureMode.HONEST_GAP.value:
+                bucket["refused"] += 1
+        return buckets
 
     @property
     def output_tokens_estimate(self) -> int:
@@ -147,15 +218,31 @@ class TrialClock:
 def score_answer(
     question: str, response: str, expected: str, judge_samples: int
 ) -> tuple[bool, FailureMode, list[str]]:
-    """Score one final-eval answer with the LLM judge.
+    """Score one final-eval answer.
 
     Returns whether it is correct, the failure mode, and the raw judge votes.
     With judge_samples above one the votes show whether the judge agreed with
     itself. That is the audit behind the single-call default.
+
+    Two axes run through here. A question with a fact for `expected` is scored
+    by the LLM judge: did the answer name that fact? A question with the
+    literal `HONEST_GAP` for `expected` is scored on the abstain axis instead:
+    a refusal is correct and a confident answer is a hallucination. That branch
+    is deterministic and spends no judge call, so adding refusal questions to a
+    scenario does not add to the judge bill, which is 92% of a campaign's cost.
+
+    Every agent trial in this module routes its final-eval answers through this
+    function, so both axes cover the whole lineup.
     """
-    result = judge_answer(question, response, expected, samples=judge_samples)
+    if expects_abstain(expected):
+        result = score_abstain_answer(response)
+        correct = result.mode is FailureMode.HONEST_GAP
+    else:
+        result = judge_answer(question, response, expected, samples=judge_samples)
+        correct = result.mode is FailureMode.CORRECT
+
     votes = [vote.value for vote in result.votes]
-    return result.mode == FailureMode.CORRECT, result.mode, votes
+    return correct, result.mode, votes
 
 
 def run_sliding_trial(
@@ -206,6 +293,7 @@ def run_sliding_trial(
                 user=question,
                 agent=response,
                 expected=expected,
+                abstain_reason=item.get("abstain_reason"),
                 failure_mode=mode.value,
                 correct=correct,
                 judge_votes=votes,
@@ -270,6 +358,7 @@ def run_vector_trial(
                 user=question,
                 agent=response,
                 expected=expected,
+                abstain_reason=item.get("abstain_reason"),
                 failure_mode=mode.value,
                 correct=correct,
                 judge_votes=votes,
@@ -371,6 +460,7 @@ def run_strong_rag_trial(
                 user=question,
                 agent=response,
                 expected=expected,
+                abstain_reason=item.get("abstain_reason"),
                 failure_mode=mode.value,
                 correct=correct,
                 judge_votes=votes,
@@ -436,6 +526,7 @@ def run_episodic_trial(
                 user=question,
                 agent=response,
                 expected=expected,
+                abstain_reason=item.get("abstain_reason"),
                 failure_mode=mode.value,
                 correct=correct,
                 judge_votes=votes,
@@ -505,6 +596,7 @@ def run_deterministic_trial(
                 user=question,
                 agent=response,
                 expected=expected,
+                abstain_reason=item.get("abstain_reason"),
                 failure_mode=mode.value,
                 correct=correct,
                 judge_votes=votes,
@@ -589,6 +681,7 @@ def run_recall_trial(
                 user=question,
                 agent=response,
                 expected=expected,
+                abstain_reason=item.get("abstain_reason"),
                 failure_mode=mode.value,
                 correct=correct,
                 judge_votes=votes,
@@ -619,6 +712,9 @@ def result_payload(
             {
                 "agent_name": result.agent_name,
                 "recall_accuracy": result.recall_accuracy,
+                "selective_accuracy": result.selective_accuracy,
+                "coverage": result.coverage,
+                "refusals_by_reason": result.refusals_by_reason,
                 "output_tokens_estimate": result.output_tokens_estimate,
                 "input_tokens_estimate": result.input_tokens_estimate,
                 "mean_chat_input_tokens": round(result.mean_chat_input_tokens, 1),
@@ -648,16 +744,44 @@ def write_markdown_report(payload: dict[str, Any], path: Path) -> None:
         "",
         "## Results",
         "",
-        "| Agent | Recall accuracy | Mean input tokens/turn | Output token estimate |",
-        "|---|---:|---:|---:|",
+        "| Agent | Recall accuracy | Mean input tokens/turn | Output token estimate | Coverage |",
+        "|---|---:|---:|---:|---:|",
     ]
 
     for agent in payload["agents"]:
         lines.append(
             f"| {agent['agent_name']} | {agent['recall_accuracy']:.2f} | "
             f"{agent.get('mean_chat_input_tokens', 0)} | "
-            f"{agent['output_tokens_estimate']} |"
+            f"{agent['output_tokens_estimate']} | "
+            f"{agent.get('coverage', 1.0):.2f} |"
         )
+
+    refusal_rows = [
+        (agent["agent_name"], agent.get("refusals_by_reason") or {})
+        for agent in payload["agents"]
+    ]
+    if any(reasons for _, reasons in refusal_rows):
+        reason_names = sorted({r for _, reasons in refusal_rows for r in reasons})
+        lines.extend(
+            [
+                "",
+                "### Refusals caught, by reason",
+                "",
+                "A question tagged with an abstain reason is one the agent should "
+                "decline. The reasons are counted apart because they fail apart.",
+                "",
+                "| Agent | " + " | ".join(reason_names) + " |",
+                "|---|" + "---:|" * len(reason_names),
+            ]
+        )
+        for name, reasons in refusal_rows:
+            cells = []
+            for reason in reason_names:
+                bucket = reasons.get(reason)
+                cells.append(
+                    f"{bucket['refused']}/{bucket['total']}" if bucket else "-"
+                )
+            lines.append(f"| {name} | " + " | ".join(cells) + " |")
 
     lines.extend(["", "## Final evaluation", ""])
     for agent in payload["agents"]:
@@ -669,6 +793,8 @@ def write_markdown_report(payload: dict[str, Any], path: Path) -> None:
                 f"  - expected: {record['expected']}",
                 f"  - mode: {record['failure_mode']}",
             ]
+            if record.get("abstain_reason"):
+                entry.append(f"  - abstain reason: {record['abstain_reason']}")
             votes = record.get("judge_votes") or []
             if len(votes) > 1:
                 agree = "unanimous" if len(set(votes)) == 1 else "split"
@@ -805,6 +931,8 @@ def main() -> None:
     for agent in payload["agents"]:
         print(agent["agent_name"])
         print("  recall accuracy:", agent["recall_accuracy"])
+        print("  coverage:", agent.get("coverage"))
+        print("  refusals by reason:", agent.get("refusals_by_reason") or "-")
         print("  mean input tokens/turn:", agent.get("mean_chat_input_tokens", 0))
         print("  output tokens estimate:", agent["output_tokens_estimate"])
     print()
